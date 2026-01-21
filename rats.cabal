@@ -52,7 +52,10 @@ extra-doc-files:    CHANGELOG.md
 -- extra-source-files:
 
 common warnings
-    ghc-options: -Wall -Wno-unused-imports -Wno-type-defaults -Wno-missing-pattern-synonym-signatures
+    ghc-options: -Wall
+      -Wno-unused-imports -Wno-type-defaults -Wno-missing-pattern-synonym-signatures
+      -Wno-missing-signatures
+      -Wunused-top-binds
 
 executable rats
     -- Import common warning flags.
@@ -62,7 +65,9 @@ executable rats
     main-is:          Main.hs
 
     -- Modules included in this executable, other than Main.
-    other-modules:    Types
+    other-modules:
+        Types
+      , MMap
 
     -- LANGUAGE extensions used by modules in this package.
     -- other-extensions:

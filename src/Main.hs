@@ -1,13 +1,15 @@
 {-# LANGUAGE TupleSections #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE PatternSynonyms #-}
-module Main where
+{-# LANGUAGE ScopedTypeVariables #-}
+module Main (main, emap) where
 
-import Control.Monad.State
 import Control.Monad.Writer
 import Data.Functor.Identity
 import Data.String
 import Data.List
+import Data.Set (Set)
+import qualified Data.Set as Set
 
 import Types
 
@@ -24,8 +26,7 @@ data I = I T T deriving (Show, Eq, Ord)
 data Term = TermPred Pred | TermVar Var | TermId Id | TermT T
   deriving (Show, Eq, Ord)
 data Op = OpLt | OpLe deriving (Show, Eq, Ord)
-data AtomType = AtomNeg | AtomPos
-  deriving (Show, Eq, Ord)
+data AtomType = AtomNeg | AtomPos deriving (Show, Eq, Ord)
 data Pattern
   = Pattern { ty :: AtomType, terms :: [Term] }
   | IdPattern { id :: Term, terms :: [Term] }
@@ -35,7 +36,9 @@ data Rule = Rule { name :: String, body :: [Pattern], head :: [Pattern] }
   deriving (Show, Eq, Ord)
 
 predString (Pred s) = s
-predPattern (Pattern _ (TermPred p : ts)) = p
+predPattern :: Pattern -> Maybe Pred
+predPattern (Pattern _ (TermPred p : _)) = Just p
+predPattern _ = Nothing
 pVars (Pattern _ ts) = varTerms ts
 pVars (IdPattern i ts) = varTerms (i:ts)
 varTerms = concatMap tVars
@@ -45,53 +48,88 @@ tVars _ = []
 instance IsString Pred where
   fromString = Pred
 
-data A = Assertion Pattern
-  -- | Choice Pattern -- maybe not
-  -- | Constraint Pattern
-data Q = Query Pattern
-
-data E
-  = Atom Pattern
-  | And E E
-  | Seq E E
-  | Par E E
-  | Over E E
-  -- sym, `@`?
+data E = Atom Pattern
+       | And E E
+       | Seq E E
+       | Par E E
+       | Over E E
   deriving (Show, Eq, Ord)
 
 pattern Lt a b = Cmp OpLt a b
 pattern Le a b = Cmp OpLe a b
---pattern Cmp op a b = Pattern [TermPred op, TermT a, TermT b]
-pattern NegAtom ts = Atom (Pattern AtomNeg ts)
-pattern PosAtom ts = Atom (Pattern AtomPos ts)
 pattern IdAtom i ts = Atom (IdPattern i ts)
 
+eTraverse :: Applicative m => (Pattern -> m E) -> E -> m E
+eTraverse f = go
+  where
+    go (Atom p) = f p
+    go (And a b) = And <$> (go a) <*> (go b)
+    go (Seq a b) = Seq <$> (go a) <*> (go b)
+    go (Par a b) = Par <$> (go a) <*> (go b)
+    go (Over a b) = Over <$> (go a) <*> (go b)
 
--- tell :: w -> Writer w ()
--- pure :: a -> Writer w a
---
+eFoldM :: Monad m => (E -> m E) -> E -> m E
+eFoldM f = go
+  where
+    go a@(Atom{}) = f a
+    go (And a b)  = do a' <- go a; b' <- go b; f $ And a' b'
+    go (Seq a b)  = do a' <- go a; b' <- go b; f $ Seq a' b'
+    go (Par a b)  = do a' <- go a; b' <- go b; f $ Par a' b'
+    go (Over a b) = do a' <- go a; b' <- go b; f $ Over a' b'
+
+emap :: (E -> E) -> E -> E
+emap f = runIdentity . eFoldM (pure . f)
+
+negUnary x = Atom (Pattern AtomNeg [TermPred (Pred x)])
+posUnary x = Atom (Pattern AtomPos [TermPred (Pred x)])
+
+freshAtomVar p | Just pr <- predPattern p = fresh $ capitalize $ predString pr
+freshAtomVar _ = fresh "_id"
+
+vars :: E -> [Var]
+vars = snd . runWriter . eTraverse go
+  where
+    go p = do tell (pVars p); pure (Atom p)
+
+elabNeg = evalM .  eFoldM go
+  where
+    go (Atom p@(Pattern AtomNeg ts)) = do
+      m <- freshAtomVar p;
+      pure $ Atom (IdPattern (TermVar (Var m)) ts)
+    go x = pure x
+
+elabPos e = evalM $ eFoldM go e
+  where
+    vs = vars e
+    go (Atom p@(Pattern AtomPos ts)) = do
+      m <- freshAtomVar p;
+      pure (IdAtom (TermId (Id m vs)) ts)
+    go x = pure x
+
+elab = elabPos . elabNeg
+
 check :: E -> Writer [Pattern] I
 check (Atom p@(IdPattern i _)) = do tell [p, Lt (L i) (R i)]; pure (I (L i) (R i))
 check (Atom p) = error $ pp p
-check (Par e1 e2) = do
-  I l1 r1 <- check e1
-  I l2 r2 <- check e2
-  pure $ I (Min l1 l2) (Max r1 r2)
+check (Par a b) = do
+  I al ar <- check a
+  I bl br <- check b
+  pure $ I (Min al bl) (Max ar br)
 check (And a b) = do
-  I aLeft aRight <- check a
-  I bLeft bRight <- check b
-  tell [Max aLeft bLeft `Lt` Min aRight bRight]
-  pure $ I (Max aLeft bLeft) (Min aRight bRight)
-check (Seq e1 e2) = do
-  I l1 r1 <- check e1
-  I l2 r2 <- check e2
-  tell [r1 `Le` l2]
-  pure $ I l1 r2
-check (Over e1 e2) = do
-  I l1 r1 <- check e1
-  I l2 r2 <- check e2
-  tell [l1 `Lt` l2, r2 `Lt` r1]
-  pure $ I l1 r2
+  I al ar <- check a
+  I bl br <- check b
+  tell [Max al bl `Lt` Min ar br]
+  pure $ I (Max al bl) (Min ar br)
+check (Seq a b) = do
+  I al ar <- check a
+  I bl br <- check b
+  tell [ar `Le` bl]
+  pure $ I al br
+check (Over a b) = do
+  I al ar <- check a
+  I bl br <- check b
+  tell [al `Lt` bl, br `Lt` ar]
+  pure $ I al br
 
 checkAll :: E -> [Pattern]
 checkAll = snd . runWriter . check
@@ -101,9 +139,8 @@ expandConstraints = concatMap expandConstraint
 expandConstraint :: Pattern -> [Pattern]
 expandConstraint (Cmp op (Max a b) c) = expandConstraints [Cmp op a c, Cmp op b c]
 expandConstraint (Cmp op a (Min b c)) = expandConstraints [Cmp op a b, Cmp op a c]
-expandConstraint p@(Cmp _ (Min _ _) _) = error $ pp p
-expandConstraint p@(Cmp _ _ (Max _ _)) = error $ pp p
--- todo
+expandConstraint p@(Cmp _ (Min _ _) _) = error $ pp p  -- no disjunctive comparisons
+expandConstraint p@(Cmp _ _ (Max _ _)) = error $ pp p  -- no disjunctive comparisons
 expandConstraint x = [x]
 
 termContainsId (TermId _) = True
@@ -122,13 +159,30 @@ isPos (Pattern {}) = error ""
 
 splitConstraints x =
   let (pos, neg) = partition isPos x
-   in (neg, pos)
-
+   in (Set.fromList neg, Set.fromList pos)
 
 chk = splitConstraints . nub . expandConstraints . checkAll . elab
+-- format and print constraints as souffle
+--   print any type declarations needed
 
 pwrap x = "(" <> x <> ")"
 bwrap x = "[" <> x <> "]"
+
+-- (a, b) / (c; d)
+--c1 :: IO ()
+--c1 = do
+--    prelude <- readFile "prelude.dl"
+--    writeFile "main.dl" $ prelude <> str
+--  where
+--    prefix = ".decl P(x: Id) .output P"
+--    str = unlines $ [prefix, compile r1]
+--    compile (Rule r [] [Pattern [TermPred (Pred p)]]) = head <> ":-" <> body <> "."
+--      where
+--        body = var <> "=[\""<> r <>"\", $Nil()]"
+--        head = p <> "(" <> var <> ")"
+--        var = "j"
+--    r1 = Rule "r1" [] [Pattern [TermPred (Pred "P")]]
+
 instance PP Id where pp (Id n vs) = n <> bwrap (unwords $ map pp vs)
 instance PP T where
   pp (L t) = pp t <> "□"
@@ -158,98 +212,18 @@ instance PP E where
   pp (Par a b) = pwrap $ pp a <> " | " <> pp b
   pp (Over a b) = pwrap $ pp a <> " / " <> pp b
 
-mtraverse :: Monad m => (E -> m E) -> E -> m E
-mtraverse f = go
-  where
-    go a@(Atom{}) = f a
-    go (And a b)  = do a' <- go a; b' <- go b; f $ And a' b'
-    go (Seq a b)  = do a' <- go a; b' <- go b; f $ Seq a' b'
-    go (Par a b)  = do a' <- go a; b' <- go b; f $ Par a' b'
-    go (Over a b) = do a' <- go a; b' <- go b; f $ Over a' b'
-
-traverse :: (E -> E) -> E -> E
-traverse f = runIdentity . mtraverse (pure . f)
-
-negUnary x = Atom (Pattern AtomNeg [TermPred (Pred x)])
-posUnary x = Atom (Pattern AtomPos [TermPred (Pred x)])
-
-type M a = (State Int) a
-evalM m = evalState m 0
-
-fresh :: String -> M Name
-fresh t = do
-  s <- get;
-  modify (+1);
-  pure $ t <> show s
-
-freshAtomVar p = fresh $ capitalize $ predString $ predPattern p
-freshAtomVar _ = fresh "_id"
-
-vars :: E -> [Var]
-vars = snd . runWriter . mtraverse go
-  where
-    go a@(IdAtom t p) = do tell (tVars t); tell (varTerms p); pure a
-    go a@(Atom p) = do tell (pVars p); pure a
-    go x = pure x
-
-elabNeg = evalM .  mtraverse go
-  where
-    go (Atom p@(Pattern AtomNeg ts)) = do
-      m <- freshAtomVar p;
-      pure $ Atom (IdPattern (TermVar (Var m)) ts)
-    go x = pure x
-
-elabPos e = evalM $ mtraverse go e
-  where
-    vs = vars e
-    go (Atom p@(Pattern AtomPos ts)) = do
-      m <- freshAtomVar p;
-      pure (IdAtom (TermId (Id m vs)) ts)
-    go x = pure x
-
-elab = elabPos . elabNeg
-
--- a, b
--- ----
--- c; d
 e1 =
   let q = And (negUnary "a") (negUnary "b")
       h = Seq (posUnary "c") (posUnary "d")
   in Over q h
-
--- collect schema from rules
--- each body pattern gets an I-var
--- each head pattern gets an I-val (constructed)
-
---overlap :: Pattern -> Pattern -> [Pattern]
---overlap = _
---compileBody :: Rule -> Writer [Pattern] ()
---compileBody (Rule {body}) =
---    mapM_  (\(c1, c2) -> tell $ overlap c1 c2)
---    (pairs body body)
-
---c1 :: IO ()
---c1 = do
---    prelude <- readFile "prelude.dl"
---    writeFile "main.dl" $ prelude <> str
---  where
---    prefix = ".decl P(x: Id) .output P"
---    str = unlines $ [prefix, compile r1]
---    compile (Rule r [] [Pattern [TermPred (Pred p)]]) = head <> ":-" <> body <> "."
---      where
---        body = var <> "=[\""<> r <>"\", $Nil()]"
---        head = p <> "(" <> var <> ")"
---        var = "j"
---    r1 = Rule "r1" [] [Pattern [TermPred (Pred "P")]]
-
-pprint :: PP a => a -> IO ()
-pprint = putStrLn . pp
+expect = (Set.fromList [IdPattern {id = TermVar (Var "A"), terms = [TermPred (Pred "a")]},IdPattern {id = TermVar (Var "B"), terms = [TermPred (Pred "b")]},Cmp OpLt (L (TermVar (Var "A"))) (R (TermVar (Var "A"))),Cmp OpLt (L (TermVar (Var "A"))) (R (TermVar (Var "B"))),Cmp OpLt (L (TermVar (Var "B"))) (R (TermVar (Var "A"))),Cmp OpLt (L (TermVar (Var "B"))) (R (TermVar (Var "B")))],Set.fromList [IdPattern {id = TermId (Id "C" [Var "A",Var "B"]), terms = [TermPred (Pred "c")]},IdPattern {id = TermId (Id "D" [Var "A",Var "B"]), terms = [TermPred (Pred "d")]},Cmp OpLt (L (TermVar (Var "A"))) (L (TermId (Id "C" [Var "A",Var "B"]))),Cmp OpLt (L (TermVar (Var "B"))) (L (TermId (Id "C" [Var "A",Var "B"]))),Cmp OpLt (L (TermId (Id "C" [Var "A",Var "B"]))) (R (TermId (Id "C" [Var "A",Var "B"]))),Cmp OpLt (L (TermId (Id "D" [Var "A",Var "B"]))) (R (TermId (Id "D" [Var "A",Var "B"]))),Cmp OpLt (R (TermId (Id "D" [Var "A",Var "B"]))) (R (TermVar (Var "A"))),Cmp OpLt (R (TermId (Id "D" [Var "A",Var "B"]))) (R (TermVar (Var "B"))),Cmp OpLe (R (TermId (Id "C" [Var "A",Var "B"]))) (L (TermId (Id "D" [Var "A",Var "B"])))])
 main = do
   pprint $ e1
   putStrLn "---------"
   pprint $ elab e1
   putStrLn "---------"
-  let (body, head) = chk e1
+  let p@(body, h) = chk e1
   mapM_ pprint body
   putStrLn "---------"
-  mapM_ pprint head
+  mapM_ pprint h
+  assert p expect

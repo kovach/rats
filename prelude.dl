@@ -1,0 +1,26 @@
+.type RuleId = symbol
+.type Id = Id { rule: RuleId, binding: Binding }
+.type Entity = Id
+.type Binding = Nil {}
+              | Bind { val: Term, rest: Binding }
+.type Term = TermPred { x: symbol }
+           | TermId { x: Id }
+.type Time = L { x: Term } | R { x: Term }
+
+.decl Lt(a: Time, b: Time)
+.decl Le(a: Time, b: Time)
+.decl Eq(a: Time, b: Time) eqrel
+Le(a,c) :- Le(a,b), Le(b,c).
+Le(a,b) :- Lt(a,b).
+Lt(a,c) :- Lt(a,b), Le(b,c).
+Lt(a,c) :- Le(a,b), Lt(b,c).
+Le(a,b) :- Eq(a,b).
+
+.decl a(x:Term)
+.decl b(x:Term)
+.decl c(x:Term)
+.decl d(x:Term)
+.output a
+.output b
+.output c
+.output d

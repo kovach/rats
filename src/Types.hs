@@ -1,13 +1,16 @@
 module Types where
 
 import Control.Monad.State
-import Data.Monoid
+import Data.Monoid (Sum(..))
 import Data.Char
 import Data.List
 import qualified MMap as M
 import MMap (MMap)
 import Data.Set (Set)
 import qualified Data.Set as Set
+
+pwrap x = "(" <> x <> ")"
+bwrap x = "[" <> x <> "]"
 
 class PP a where
   pp  :: a -> String
@@ -36,7 +39,9 @@ type Ms b c a = (State (MMap b c)) a
 type M a = Ms String (Sum Int) a
 evalM m = evalState m M.empty
 
-fresh :: String -> M String
+type MonadFreshVarState m = MonadState (MMap String (Sum Int)) m
+
+fresh :: (MonadFreshVarState m) => String -> m String
 fresh t = do
   Sum i <- gets (M.lookup t);
   modify (M.insert t 1)

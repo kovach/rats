@@ -25,7 +25,9 @@ import MMap (MMap)
 -- type MonadComp m = (MonadPatternWriter m, MonadFreshVarState m)
 -- type MC a = WriterT [Pattern] (State (MMap String (Sum Int))) a
 
-pattern P p i ts = IdPattern i (TermPred p : ts)
+-- todo: one case
+pattern PI p i ts = IdPattern i (TermPred p : ts)
+pattern P ty p ts = Pattern ty (TermPred p : ts)
 
 leftEnd (TermAfter t) = rightEnd t
 leftEnd t = L t
@@ -81,9 +83,17 @@ freshAtomVar p | Just pr <- predPattern p = fresh $ capitalize $ predString pr
 freshAtomVar _ = fresh "_id"
 
 vars :: E -> [Var]
-vars = snd . runWriter . eTraverse go
+vars = execWriter . eTraverse go
   where
     go p = do tell (pVars p); pure (Atom p)
+
+schema :: E -> [(Pred, Int)]
+schema = execWriter . eTraverse go
+  where
+    go p@(P _ pr ts) = do tell [(pr, length ts)]; pure (Atom p)
+    go p@(PI pr _ ts) = do tell [(pr, length ts)]; pure (Atom p)
+    go p = pure (Atom p)
+
 
 elabNeg = eTraverse go
   where
@@ -104,10 +114,11 @@ elabPos ruleName e = eTraverse go e
 
 type Rule = (Name, E)
 
-elab r = elabNeg >=> elabPos r
-runElab = evalM . uncurry elab
+elabNegPos r = elabNeg >=> elabPos r
+elab = evalM . uncurry elabNegPos
+
 elabAll :: [Rule] -> [E]
-elabAll = evalM . mapM (uncurry elab)
+elabAll = evalM . mapM (uncurry elabNegPos)
 
 type MonadPatternWriter m = MonadWriter [Pattern] m
 
@@ -172,9 +183,13 @@ splitConstraints x =
 
 chk = splitConstraints . expandConstraints . checkAll
 
+compile :: [(Name, E)] -> String
 compile ps =
-  let ps' = ps
-  in map (ruleCompile . chk . runElab) ps'
+  let sch = nub $ concatMap (schema . snd) ps
+  in
+    unlines $
+      map schemaCompile sch
+      <> map (ruleCompile . chk . elab) ps
 
 commas = intercalate ", "
 args = pwrap . intercalate ", "
@@ -187,10 +202,14 @@ ruleCompile (body, h) =
     <> commas (map patternCompile $ Set.toList body)
     <> "\n."
 
+schemaCompile (p, arity) =
+  ".decl " <> pp p <> args (replicate (arity+1) "x:Term")
+  <> " .output " <> pp p
+
 patternCompile1 = (<> ".") . patternCompile
 patternCompile :: Pattern -> String
 patternCompile = \case
-  P p i ts -> pp p <> args (map termCompile $ i : ts)
+  PI p i ts -> pp p <> args (map termCompile $ i : ts)
   IdPattern _ _ -> error ""
   Cmp op a b -> opString op <> pwrap (commas $ map tCompile [a,b])
   IsId t -> "IsId" <> pwrap (termCompile t)
@@ -255,5 +274,5 @@ demo name = do
 main = do
   demo "foo"
 
-  let result = unlines $ compile rules
+  let result = compile rules
   mkFile "out.dl" $ result

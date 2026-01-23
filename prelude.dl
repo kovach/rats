@@ -15,9 +15,3 @@ Le(a,b) :- Lt(a,b).
 Lt(a,c) :- Lt(a,b), Le(b,c).
 Lt(a,c) :- Le(a,b), Lt(b,c).
 Le(a,b) :- Eq(a,b).
-
-.decl a(x:Term) .output a
-.decl b(x:Term) .output b
-.decl c(x:Term) .output c
-.decl d(x:Term) .output d
-.decl e(x:Term) .output e

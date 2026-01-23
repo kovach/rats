@@ -53,3 +53,5 @@ expr3 = over <|> expr2
     over = uncurry T.Over <$> sep2 (char '/') expr2 expr3
 
 expr = expr3
+
+program = many (ws *> expr <* ws <* char '.') <* ws

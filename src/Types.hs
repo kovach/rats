@@ -8,6 +8,45 @@ import qualified MMap as M
 import MMap (MMap)
 import Data.Set (Set)
 import qualified Data.Set as Set
+import Data.String
+
+data Var = Blank | Var String | CVar String
+  deriving (Show, Eq, Ord)
+type Name = String
+data Id = Id Name [Var]
+  deriving (Show, Eq, Ord)
+data Pred = Pred String
+  deriving (Show, Eq, Ord)
+data T = L Term | R Term | Min T T | Max T T | Top
+  deriving (Show, Eq, Ord)
+data I = I T T deriving (Show, Eq, Ord)
+data Term = TermPred Pred
+          | TermVar Var
+          | TermId Id
+          | TermAfter Term
+  deriving (Show, Eq, Ord)
+
+data Op = OpLt | OpLe deriving (Show, Eq, Ord)
+data AtomType
+  = AtomDuring
+  | AtomAfter
+  | AtomPos
+  deriving (Show, Eq, Ord)
+
+data BasePred = BaseLe | BaseLt
+data Pattern
+  = Pattern { ty :: AtomType, terms :: [Term] }
+  | IdPattern { id :: Term, terms :: [Term] }
+  | Cmp Op T T
+  | IsId Term
+  deriving (Show, Eq, Ord)
+
+data E = Atom Pattern
+       | And E E
+       | Seq E E
+       | Par E E
+       | Over E E
+  deriving (Show, Eq, Ord)
 
 pwrap x = "(" <> x <> ")"
 bwrap x = "[" <> x <> "]"
@@ -46,3 +85,37 @@ fresh t = do
   Sum i <- gets (M.lookup t);
   modify (M.insert t 1)
   pure $ t <> (if i == 0 then "" else show i)
+
+instance IsString Pred where
+  fromString = Pred
+
+instance PP Id where pp (Id n vs) = n <> bwrap (unwords $ map pp vs)
+instance PP T where
+  pp (L t) = pp t <> "□"
+  pp (R t) = pp t <> "∎"
+  --pp t = show t
+  pp (Min a b) = "min(" <> pp a <> ", " <> pp b <> ")"
+  pp (Max a b) = "max(" <> pp a <> ", " <> pp b <> ")"
+  pp Top = "⊤"
+instance PP Pred where pp (Pred s) = s
+instance PP Var where
+  pp = \case { Var v -> v; CVar cv -> cv; Blank -> "_" }
+instance PP Term where
+  pp (TermVar v) = pp v
+  pp (TermPred p) = pp p
+  pp (TermId i) = pp i
+  pp (TermAfter i) = ">" <> pp i
+instance PP Pattern where
+  pp (Pattern AtomDuring c) = "?" <> (pwrap . unwords . map pp $ c)
+  pp (Pattern AtomAfter c) = ">" <> (pwrap . unwords . map pp $ c)
+  pp (Pattern AtomPos c) = "!" <> (pwrap . unwords . map pp $ c)
+  pp (IdPattern i c) = pp i <> ":" <> (pwrap . unwords . map pp $ c)
+  pp (Cmp OpLt a b) = pp a <> " < " <> pp b
+  pp (Cmp OpLe a b) = pp a <> " ≤ " <> pp b
+  pp (IsId t) = "IsId " <> pp t
+instance PP E where
+  pp (Atom p) = pp p
+  pp (And a b) = pwrap $ pp a <> ", " <> pp b
+  pp (Seq a b) = pwrap $ pp a <> "; " <> pp b
+  pp (Par a b) = pwrap $ pp a <> " | " <> pp b
+  pp (Over a b) = pwrap $ pp a <> " / " <> pp b

@@ -5,40 +5,25 @@
 {-# LANGUAGE ConstraintKinds #-}
 module Main (main) where
 
-import Prelude hiding (pred)
+import Prelude hiding (pred, exp)
 import Control.Monad.Writer
 import Control.Monad.State
 import Control.Monad
 import Data.Monoid (Sum(..))
+import Data.Maybe
 import Data.Functor.Identity
-import Data.String
 import Data.List
 import Data.Set (Set)
 import qualified Data.Set as Set
 
 import Types
+import Parser
+import ParserCombinator
 import MMap (MMap)
 
-data Var = Blank | Var String | CVar String
-  deriving (Show, Eq, Ord)
-type Name = String
-data Id = Id Name [Var]
-  deriving (Show, Eq, Ord)
-data Pred = Pred String
-  deriving (Show, Eq, Ord)
-data T = L Term | R Term | Min T T | Max T T | Top
-  deriving (Show, Eq, Ord)
-data I = I T T deriving (Show, Eq, Ord)
-data Term = TermPred Pred | TermVar Var | TermId Id
-          | TermAfter Term
-  deriving (Show, Eq, Ord)
-data Op = OpLt | OpLe deriving (Show, Eq, Ord)
-data AtomType = AtomNeg | AtomPos deriving (Show, Eq, Ord)
-data Pattern
-  = Pattern { ty :: AtomType, terms :: [Term] }
-  | IdPattern { id :: Term, terms :: [Term] }
-  | Cmp Op T T
-  deriving (Show, Eq, Ord)
+-- todo
+-- type MonadComp m = (MonadPatternWriter m, MonadFreshVarState m)
+-- type MC a = WriterT [Pattern] (State (MMap String (Sum Int))) a
 
 pattern P p i ts = IdPattern i (TermPred p : ts)
 
@@ -63,15 +48,6 @@ tVars (R t) = termVars t
 tVars (Min a b) = tVars a <> tVars b
 tVars (Max a b) = tVars a <> tVars b
 tVars Top = []
-instance IsString Pred where
-  fromString = Pred
-
-data E = Atom Pattern
-       | And E E
-       | Seq E E
-       | Par E E
-       | Over E E
-  deriving (Show, Eq, Ord)
 
 pattern Lt a b = Cmp OpLt a b
 pattern Le a b = Cmp OpLe a b
@@ -95,10 +71,10 @@ eFoldM f = go
     go (Par a b)  = do a' <- go a; b' <- go b; f $ Par a' b'
     go (Over a b) = do a' <- go a; b' <- go b; f $ Over a' b'
 
-emap :: (E -> E) -> E -> E
-emap f = runIdentity . eFoldM (pure . f)
+-- emap :: (E -> E) -> E -> E
+-- emap f = runIdentity . eFoldM (pure . f)
 
-negUnary x = Atom (Pattern AtomNeg [TermPred (Pred x)])
+negUnary x = Atom (Pattern AtomDuring [TermPred (Pred x)])
 posUnary x = Atom (Pattern AtomPos [TermPred (Pred x)])
 
 freshAtomVar p | Just pr <- predPattern p = fresh $ capitalize $ predString pr
@@ -111,9 +87,10 @@ vars = snd . runWriter . eTraverse go
 
 elabNeg = eTraverse go
   where
-    go (p@(Pattern AtomNeg ts)) = do
-      m <- freshAtomVar p;
-      pure $ Atom (IdPattern (TermVar (Var m)) ts)
+    go (p@(Pattern AtomDuring ts)) = do
+      m <- freshAtomVar p; pure $ Atom (IdPattern (TermVar (Var m)) ts)
+    go (p@(Pattern AtomAfter ts)) = do
+      m <- freshAtomVar p; pure $ Atom (IdPattern (TermAfter $ TermVar (Var m)) ts)
     go p = pure (Atom p)
 
 elabPos ruleName e = eTraverse go e
@@ -162,14 +139,17 @@ check (Over a b) = do
 checkAll :: E -> [Pattern]
 checkAll = snd . runWriter . check
 
-expandConstraints :: [Pattern] -> [Pattern]
-expandConstraints = concatMap expandConstraint
+-- expand and simplify constrains:
 expandConstraint :: Pattern -> [Pattern]
 expandConstraint (Cmp op (Max a b) c) = expandConstraints [Cmp op a c, Cmp op b c]
 expandConstraint (Cmp op a (Min b c)) = expandConstraints [Cmp op a b, Cmp op a c]
+expandConstraint (Cmp _ _ Top) = []
 expandConstraint p@(Cmp _ (Min _ _) _) = error $ pp p  -- no disjunctive comparisons
 expandConstraint p@(Cmp _ _ (Max _ _)) = error $ pp p  -- no disjunctive comparisons
 expandConstraint x = [x]
+
+expandConstraints :: [Pattern] -> [Pattern]
+expandConstraints = concatMap expandConstraint
 
 termContainsId (TermId _) = True
 termContainsId _ = False
@@ -183,6 +163,7 @@ tContainsId = \case
 isPos :: Pattern -> Bool
 isPos (IdPattern i ts) = any termContainsId (i:ts)
 isPos (Cmp _ a b) = any tContainsId [a,b]
+isPos (IsId t) = termContainsId t
 isPos (Pattern {}) = error ""
 
 splitConstraints x =
@@ -194,9 +175,6 @@ chk = splitConstraints . expandConstraints . checkAll
 compile ps =
   let ps' = ps
   in map (ruleCompile . chk . runElab) ps'
-
-type MonadComp m = (MonadPatternWriter m, MonadFreshVarState m)
-type MC a = WriterT [Pattern] (State (MMap String (Sum Int))) a
 
 commas = intercalate ", "
 args = pwrap . intercalate ", "
@@ -215,15 +193,16 @@ patternCompile = \case
   P p i ts -> pp p <> args (map termCompile $ i : ts)
   IdPattern _ _ -> error ""
   Cmp op a b -> opString op <> pwrap (commas $ map tCompile [a,b])
+  IsId t -> "IsId" <> pwrap (termCompile t)
   Pattern {} -> error ""
 opString OpLt = "Lt"
 opString OpLe = "Le"
 termCompile :: Term -> String
-termCompile t = case t of
+termCompile = \case
   TermVar v -> pp v -- !
-  TermPred pred -> cons "TermPred" [pp pred]
+  TermPred pr -> cons "TermPred" [pp pr]
   TermId i -> cons "TermId" [compileId i]
-  TermAfter _ -> error "todo"
+  TermAfter t -> termCompile t
 compileId (Id n vs) = cons "Id" [show n, toBinding vs]
 toBinding [] = cons "Nil" []
 toBinding (t:ts) = cons "Bind" [pp t, toBinding ts]
@@ -239,54 +218,17 @@ mkFile path p = do
   prelude <- readFile "prelude.dl"
   writeFile path $ prelude <> p
 
-instance PP Id where pp (Id n vs) = n <> bwrap (unwords $ map pp vs)
-instance PP T where
-  pp (L t) = pp t <> "□"
-  pp (R t) = pp t <> "∎"
-  --pp t = show t
-  pp (Min a b) = "min(" <> pp a <> ", " <> pp b <> ")"
-  pp (Max a b) = "max(" <> pp a <> ", " <> pp b <> ")"
-  pp Top = "⊤"
-instance PP Pred where pp (Pred s) = s
-instance PP Var where
-  pp = \case { Var v -> v; CVar cv -> cv; Blank -> "_" }
-instance PP Term where
-  pp (TermVar v) = pp v
-  pp (TermPred p) = pp p
-  pp (TermId i) = pp i
-  pp (TermAfter i) = ">" <> pp i
-  --pp (TermT t) = pp t
-instance PP Pattern where
-  --pp (PredPattern p []) = pp p
-  pp (Pattern AtomNeg c) = "?" <> (pwrap . unwords . map pp $ c)
-  pp (Pattern AtomPos c) = "!" <> (pwrap . unwords . map pp $ c)
-  pp (IdPattern id c) = pp id <> ":" <> (pwrap . unwords . map pp $ c)
-  pp (Cmp OpLt a b) = pp a <> " < " <> pp b
-  pp (Cmp OpLe a b) = pp a <> " ≤ " <> pp b
-instance PP E where
-  pp (Atom p) = pp p
-  pp (And a b) = pwrap $ pp a <> ", " <> pp b
-  pp (Seq a b) = pwrap $ pp a <> "; " <> pp b
-  pp (Par a b) = pwrap $ pp a <> " | " <> pp b
-  pp (Over a b) = pwrap $ pp a <> " / " <> pp b
-
-ands :: [E] -> E
-ands = foldr1 And
+exp = assertParse expr
 
 --
 -- Example:
 -- `a` and 2 `b`s that overlap:
---   !a, !b, !b
-e_ab = ands [posUnary "a", posUnary "b", posUnary "b"]
+e_ab = assertParse expr "!a, !b, !b" -- ands [posUnary "a", posUnary "b", posUnary "b"]
 -- an `a` that encloses `a` b:
---   !a / !b
-e_ab' = Over (posUnary "a") (posUnary "b")
+e_ab' = assertParse expr "!a / !b" -- Over (posUnary "a") (posUnary "b")
 -- within every `a`,`b` overlap, do (`c`, then `d`):
---   (a, b) / (!c; !d)
-e_cd =
-  let q = And (negUnary "a") (negUnary "b")
-      h = Par (posUnary "c") (posUnary "d")
-  in Over q h
+e_cd = assertParse expr "?a, ?b / !c | !d"
+
 -- End state: three `c` and `d` episodes.
 --
 
@@ -294,9 +236,11 @@ rules =
   [ ("r", e_cd)
   , ("ab", e_ab)
   , ("a/b", e_ab')
+  , ("foo", exp ">d, !e")
   ]
 
-demo f = do
+demo name = do
+  let f = (name, fromJust $ lookup name rules)
   pprint $ snd f
   putStrLn "~~~~~~~~~"
   let [f'] = elabAll [f]
@@ -304,12 +248,12 @@ demo f = do
   putStrLn "~~~~~~~~~"
   let (body, h) = chk f'
   mapM_ pprint body
-  putStrLn "~~~~~~~~~"
+  putStrLn "---------"
   mapM_ pprint h
   putStrLn "~~~~~~~~~"
 
 main = do
-  demo $ rules !! 0
+  demo "foo"
 
   let result = unlines $ compile rules
   mkFile "out.dl" $ result

@@ -12,25 +12,25 @@ pred = p
     p = T.Pred <$> predicate
 
 var :: Parser T.Var
-var = b <|> v <|> cv
+var = v
   where
-    b = pure T.Blank <* char '_'
     v = T.Var <$> variable
-    cv = T.CVar <$> (char '?' *> variable)
+    --cv = T.CVar <$> (char '?' *> variable)
 
 term :: Parser T.Term
-term = fv <|> v <|> p <|> rand
+term = fv <|> v <|> p <|> rand <|> b
   where
     v = (T.TermVar <$> var)
     p = (T.TermPred <$> pred)
     fv = T.TermFreshVar <$> (char '!' *> variable)
     rand = pure (T.TermExt "$") <* char '$'
+    b = pure T.TermBlank <* char '_'
 
 pattern :: Parser T.Pattern
 pattern = q <|> a
   where
-    q = T.Pattern T.AtomDuring <$> (char '?' *> wsSep term)
-    a = T.Pattern T.AtomPos <$> (char '!' *> wsSep term)
+    q = T.Pattern T.AtomNeg T.PVar0 <$> (char '?' *> wsSep term)
+    a = T.Pattern T.AtomPos T.PVar0 <$> (char '!' *> wsSep term)
     --af = T.Pattern T.AtomAfter <$> (char '>' *> wsSep term)
 
 expr1 :: Parser T.E

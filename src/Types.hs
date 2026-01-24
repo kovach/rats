@@ -1,3 +1,4 @@
+{-# LANGUAGE PatternSynonyms #-}
 module Types where
 
 import Control.Monad.State
@@ -11,7 +12,7 @@ import qualified Data.Set as Set
 import Data.String
 
 type Name = String
-data Var = Blank | Var Name | CVar Name
+data Var = Var Name
   deriving (Show, Eq, Ord)
 data Id = Id Name [Var]
   deriving (Show, Eq, Ord)
@@ -24,27 +25,32 @@ data Term = TermPred Pred
           | TermVar Var
           | TermFreshVar String
           | TermId Id
-          | TermAfter Term -- todo remove
           | TermExt String
+          | TermBlank
   deriving (Show, Eq, Ord)
 
 data Op = OpLt | OpLe | OpEq deriving (Show, Eq, Ord)
 data AtomType
-  = AtomDuring
-  | AtomAfter
+  = AtomNeg
   | AtomPos
   deriving (Show, Eq, Ord)
 
+data PVar
+  = PVar2 Var [Var] Name
+  | PVar0
+  deriving (Show, Eq, Ord)
+
 data Pattern
-  = Pattern { ty :: AtomType, terms :: [Term] }
-  | IdPattern { id :: Term, terms :: [Term] }
+  = Pattern { ty :: AtomType, id :: PVar, terms :: [Term] }
   | Cmp Op T T
+  | Eq Term Term
   | IsId Term
   deriving (Show, Eq, Ord)
 
+--pattern IdPattern ty i terms = Pattern ty (Just i) terms
+
 data E = Atom Pattern
        | After E
-       | Fresh Name
        | And E E
        | Seq E E
        | Par E E
@@ -101,26 +107,29 @@ instance PP Id where pp (Id n vs) = n <> bwrap (unwords $ map pp vs)
 instance PP T where
   pp (L t) = pp t <> "□"
   pp (R t) = pp t <> "∎"
-  --pp t = show t
   pp (Min a b) = "min(" <> pp a <> ", " <> pp b <> ")"
   pp (Max a b) = "max(" <> pp a <> ", " <> pp b <> ")"
   pp Top = "⊤"
 instance PP Pred where pp (Pred s) = s
 instance PP Var where
-  pp = \case { Var v -> v; CVar cv -> cv; Blank -> "_" }
+  pp = \case { Var v -> v }
 instance PP Term where
   pp (TermVar v) = pp v
   pp (TermPred p) = pp p
   pp (TermId i) = pp i
-  pp (TermAfter i) = ">" <> pp i
   pp (TermFreshVar v) = "!" <> v
   pp (TermExt s) = s
+  pp TermBlank = "_"
+instance PP AtomType where
+  pp AtomNeg = "?"
+  pp AtomPos = "!"
 instance PP Pattern where
-  pp (Pattern AtomDuring c) = "?" <> (pwrap . unwords . map pp $ c)
-  pp (Pattern AtomAfter c) = ">" <> (pwrap . unwords . map pp $ c)
-  pp (Pattern AtomPos c) = "!" <> (pwrap . unwords . map pp $ c)
-  pp (IdPattern i c) = pp i <> ":" <> (pwrap . unwords . map pp $ c)
+  pp (Pattern sign PVar0 c) = pp sign <> (pwrap . unwords . map pp $ c)
+  pp (Pattern sign (PVar2 i vs n) c) =
+    pp sign <> pwrap (pp i <> "=" <> pp (Id n vs)) <> ":"
+    <> (pwrap . unwords . map pp $ c)
   pp (Cmp op a b) = pp a <> spwrap (pp op) <> pp b
+  pp (Eq a b) = pp a <> spwrap "=" <> pp b
   pp (IsId t) = "IsId " <> pp t
 instance PP Op where
   pp OpLt = "<"
@@ -128,7 +137,6 @@ instance PP Op where
   pp OpEq = "="
 instance PP E where
   pp (Atom p) = pp p
-  pp (Fresh n) = "!" <> n
   pp (After e) = ">" <> pp e
   pp (And a b) = pwrap $ pp a <> ", " <> pp b
   pp (Seq a b) = pwrap $ pp a <> "; " <> pp b

@@ -27,31 +27,27 @@ import MMap (MMap)
 -- type MC a = WriterT [Pattern] (State (MMap String (Sum Int))) a
 
 -- todo: one case
-pattern PI p i ts = IdPattern i (TermPred p : ts)
-pattern P ty p ts = Pattern ty (TermPred p : ts)
+pattern PP p ts <- Pattern _ _ (TermPred p : ts)
+pattern PPI p i ts <- Pattern _ (PVar2 i _ _) (TermPred p : ts)
 
-leftEnd (TermAfter t) = rightEnd t
-leftEnd t = L t
-rightEnd (TermAfter _) = Top
-rightEnd t = R t
+leftEnd t = L (TermVar t)
+rightEnd t = R (TermVar t)
 
 predString (Pred s) = s
 predPattern :: Pattern -> Maybe Pred
-predPattern (Pattern _ (TermPred p : _)) = Just p
+predPattern (PP p _) = Just p
 predPattern _ = Nothing
-patternVars (Pattern _ ts) = varTerms ts
-patternVars (IdPattern i ts) = varTerms (i:ts)
+patternVars (Pattern _ PVar0 ts) = varTerms ts
+patternVars (Pattern _ (PVar2 i _ _) ts) = i : varTerms ts
 patternVars (Cmp _ a b) = tVars a <> tVars b
 patternVars (IsId t) = termVars t
 varTerms = concatMap termVars
 termVars (TermVar (Var v)) = [Var v]
-termVars (TermVar (CVar v)) = [CVar v]
-termVars (TermVar _) = []
 termVars (TermId (Id _ vs)) = vs
 termVars (TermPred {}) = []
-termVars (TermAfter {}) = []
 termVars (TermFreshVar {}) = []
 termVars (TermExt _) = []
+termVars TermBlank = []
 tVars (L t) = termVars t
 tVars (R t) = termVars t
 tVars (Min a b) = tVars a <> tVars b
@@ -61,7 +57,9 @@ tVars Top = []
 pattern Lt a b = Cmp OpLt a b
 pattern Le a b = Cmp OpLe a b
 pattern Eql a b = Cmp OpEq a b
-pattern IdAtom i ts = Atom (IdPattern i ts)
+
+eTraverse' :: Applicative m => (E -> m ()) -> E -> m ()
+eTraverse' f e0 = eTraverse (\e -> f e *> pure e) e0 *> pure ()
 
 eTraverse :: Applicative m => (E -> m E) -> E -> m E
 eTraverse f = go
@@ -78,22 +76,25 @@ eTermTraverse :: forall m. Applicative m => (Term -> m Term) -> E -> m E
 eTermTraverse f = eTraverse go
   where
     go :: E -> m E
-    go (Atom (Pattern ty ts)) =
-      (\ts' -> Atom (Pattern ty ts')) <$>
-        (sequenceA $ map (termTraverse f) ts)
-    go (Atom (IdPattern i ts)) =
-      (\ts' -> Atom (IdPattern i ts')) <$>
+    go (Atom (Pattern ty mv ts)) =
+      (\ts' -> Atom (Pattern ty mv ts')) <$>
         (sequenceA $ map (termTraverse f) ts)
     go e = pure e
 
 termTraverse :: Applicative m => (Term -> m Term) -> Term -> m Term
 termTraverse f = go
   where
-    go (TermAfter t) = TermAfter <$> go t
     go t = f t
 
-negUnary x = Atom (Pattern AtomDuring [TermPred (Pred x)])
-posUnary x = Atom (Pattern AtomPos [TermPred (Pred x)])
+tTraverse:: Applicative m => (T -> m T) -> T -> m T
+tTraverse f =  go
+  where
+    go t@(L _) = f t
+    go t@(R _) = f t
+    go Top = f Top
+    go (Min a b) = Min <$> go a <*> go b
+    go (Max a b) = Max <$> go a <*> go b
+
 
 freshAtomVar p | Just pr <- predPattern p = fresh $ capitalize $ predString pr
 freshAtomVar _ = fresh "_id"
@@ -103,45 +104,51 @@ idConstructor ruleName p vs = do
   pure $ Id (ruleName <> ":__" <> m) vs
 
 vars :: E -> [Var]
-vars = execWriter . eTraverse go
+vars = execWriter . eTraverse' go
   where
-    go (Atom p) = do tell (patternVars p); pure (Atom p)
-    go e = pure e
+    go (Atom p) = tell (patternVars p)
+    go _ = pure ()
+
+posVars :: E -> [Var]
+posVars = execWriter . eTraverse' go
+  where
+    go (Atom (Pattern AtomPos (PVar2 v _ _) _)) = tell [v]
+    go _ = pure ()
 
 schema :: E -> [(Pred, Int)]
 schema = execWriter . eTraverse go
   where
-    go e@(Atom (P _ pr ts)) = do tell [(pr, length ts)]; pure e
-    go e@(Atom (PI pr _ ts)) = do tell [(pr, length ts)]; pure e
+    go e@(Atom (PP pr ts)) = do tell [(pr, length ts)]; pure e
     go e = pure e
 
 
-elabNeg = eTraverse go
-  where
-    go (Atom p@(Pattern AtomDuring ts)) = do
-      m <- freshAtomVar p; pure $ IdAtom (TermVar (Var m)) ts
-    go (Atom p@(Pattern AtomAfter ts)) = do
-      m <- freshAtomVar p; pure $ IdAtom (TermAfter $ TermVar (Var m)) ts
-    go e = pure e
-
-elabPos ruleName e = eTraverse go e
+elabNegAtoms ruleName e = eTraverse go e
   where
     vs = vars e
-    go (Atom p@(Pattern AtomPos ts)) = do
-      i <- idConstructor ruleName p vs
-      pure (IdAtom (TermId i) ts)
+    go (Atom p@(Pattern AtomNeg PVar0 ts)) = do
+      m <- freshAtomVar p;
+      pure $ Atom $ Pattern AtomNeg (PVar2 (Var m) vs ruleName) ts
     go e' = pure e'
 
-elabPosVar ruleName e = eTermTraverse go e
+elabPosAtoms vs ruleName e = eTraverse go e
   where
-    vs = vars e
+    go (Atom p@(Pattern AtomPos PVar0 ts)) = do
+      m <- freshAtomVar p;
+      pure $ Atom $ Pattern AtomPos (PVar2 (Var m) vs ruleName) ts
+    go e' = pure e'
+
+elabPosVar vs ruleName e = eTermTraverse go e
+  where
     go (TermFreshVar v) = pure $
       TermId $ Id (ruleName <> ":" <> v) vs
     go e' = pure e'
 
 type Rule = (Name, E)
 
-elabNegPos r = elabNeg >=> elabPos r >=> elabPosVar r
+elabNegPos r e0 = do
+  e1 <- elabNegAtoms r e0
+  let vs = vars e1
+  elabPosAtoms (vars e1) r e1 >>= elabPosVar vs r
 elab = evalM . uncurry elabNegPos
 
 elabAll :: [Rule] -> [E]
@@ -150,11 +157,15 @@ elabAll = evalM . mapM (uncurry elabNegPos)
 type MonadPatternWriter m = MonadWriter [Pattern] m
 
 check :: MonadPatternWriter m => E -> m I
-check (Atom p@(IdPattern i _)) = do
-  tell [p, Lt (leftEnd i) (rightEnd i)];
-  pure (I (leftEnd i) (rightEnd i))
+check (Atom p@(Pattern AtomPos (PVar2 v vs name) _)) = do
+  let i = Id (name <> ":__" <> pp v) vs
+  tell [p, (leftEnd v) `Lt` (rightEnd v), Eq (TermVar v) (TermId i)];
+  pure (I (leftEnd v) (rightEnd v))
+check (Atom p@(Pattern AtomNeg (PVar2 v _ _) _)) = do
+  tell [p, (leftEnd v) `Lt` (rightEnd v)];
+  pure (I (leftEnd v) (rightEnd v))
 check (Atom p) = error $ pp p
-check (Fresh v) = undefined
+-- check (Atom p) = error $ pp p
 check (After e) = do
   I _ ar <- check e
   pure $ I ar Top
@@ -198,26 +209,33 @@ expandConstraint x = [x]
 expandConstraints :: [Pattern] -> [Pattern]
 expandConstraints = concatMap expandConstraint
 
-termContainsId (TermId _) = True
-termContainsId _ = False
-tContainsId = \case
-  L t' -> termContainsId t'
-  R t' -> termContainsId t'
-  Min t1 t2 -> tContainsId t1 || tContainsId t2
-  Max t1 t2 -> tContainsId t1 || tContainsId t2
+termContainsId vs (TermVar v) = v `elem` vs
+termContainsId _ _ = False
+
+tContainsId vs = \case
+  L t' -> termContainsId vs t'
+  R t' -> termContainsId vs t'
+  Min t1 t2 -> tContainsId vs t1 || tContainsId vs t2
+  Max t1 t2 -> tContainsId vs t1 || tContainsId vs t2
   Top -> False
 
-isPos :: Pattern -> Bool
-isPos (IdPattern i ts) = any termContainsId (i:ts)
-isPos (Cmp _ a b) = any tContainsId [a,b]
-isPos (IsId t) = termContainsId t
-isPos (Pattern {}) = error ""
+isPos _ (Pattern AtomPos _ _) = True
+isPos _ (Pattern{}) = False
+isPos _ (Eq _ _) = False
+isPos vs (Cmp _ a b) = any (tContainsId vs) [a,b]
+isPos vs (IsId t) = termContainsId vs t
 
-splitConstraints x =
-  let (pos, neg) = partition isPos x
+splitConstraints :: [Var] -> [Pattern] -> (Set Pattern, Set Pattern)
+splitConstraints pvs x =
+  let (pos, neg) = partition (isPos pvs) x
    in (Set.fromList neg, Set.fromList pos)
 
-chk = splitConstraints . expandConstraints . checkAll
+generateConstraints e = splitConstraints (posVars e) $ expandConstraints . checkAll $ e
+
+compileExp e = result
+  where
+    e' = elab e
+    result = ruleCompile . generateConstraints $ e'
 
 compile :: [(Name, Statement)] -> String
 compile ps = result
@@ -228,10 +246,12 @@ compile ps = result
     sch = nub $ concatMap (schema . snd) es
     result = unlines $
       map (schemaCompile ops) sch
-      <> map (ruleCompile . chk . elab) es
+      <> map compileExp es
 
 commas = intercalate ", "
 args = pwrap . intercalate ", "
+
+ruleCompile :: (Set Pattern, Set Pattern) -> String
 ruleCompile (body, h) =
   if Set.size body == 0 then
    unwords (map patternCompile1 $ Set.toList h)
@@ -249,23 +269,22 @@ schemaCompile countPreds (p, arity) =
 patternCompile1 = (<> ".") . patternCompile
 patternCompile :: Pattern -> String
 patternCompile = \case
-  PI p i ts -> pp p <> args (map termCompile $ i : ts)
-  IdPattern _ _ -> error ""
-  Cmp op a b -> opString op <> pwrap (commas $ map tCompile [a,b])
-  IsId t -> "IsId" <> pwrap (termCompile t)
+  PPI p i ts -> pp p <> args (pp i : map termCompile ts)
   Pattern {} -> error ""
+  Cmp op a b -> opString op <> pwrap (commas $ map tCompile [a,b])
+  Eq a b -> termCompile a <> " = " <> termCompile b
+  IsId t -> "IsId" <> pwrap (termCompile t)
 opString OpLt = "Lt"
 opString OpLe = "Le"
-opString OpEq = "Eq"
 termCompile :: Term -> String
 termCompile = \case
-  TermVar v -> pp v -- !
-  TermPred pr -> cons "TermPred" [pp pr]
+  TermVar v -> pp v
+  TermPred pr -> cons "TermPred" [show $ pp pr]
   TermId i -> cons "TermId" [compileId i]
-  TermAfter t -> termCompile t
   TermFreshVar _ -> error ""
   TermExt "$" -> cons "TermNum" ["autoinc()"]
   TermExt _ -> error "unhandled"
+  v@TermBlank -> pp v
 compileId (Id n vs) = cons "Id" [show n, toBinding vs]
 toBinding [] = cons "Nil" []
 toBinding (t:ts) = cons "Bind" [pp t, toBinding ts]
@@ -305,21 +324,26 @@ rules =
   ]
 
 demo name rules = do
-  let f = (name, fromJust $ lookup name rules)
-  pprint $ snd f
-  putStrLn "~~~~~~~~~"
-  let [f'] = elabAll [f]
-  pprint f'
-  putStrLn "~~~~~~~~~"
-  let (body, h) = chk f'
-  mapM_ pprint body
-  putStrLn "---------"
-  mapM_ pprint h
-  putStrLn "~~~~~~~~~"
+  case lookup name rules of
+    Just (Rule r) -> do
+      let f = (name, r)
+      --let f = (name, fromJust $ lookup name rules)
+      pprint $ snd f
+      putStrLn "~~~~~~~~~"
+      let [f'] = elabAll [f]
+      pprint f'
+      putStrLn "~~~~~~~~~"
+      let (body, h) = generateConstraints f'
+      mapM_ pprint body
+      putStrLn "---------"
+      mapM_ pprint h
+      putStrLn "~~~~~~~~~"
+    _ -> error ""
 
 main = do
-  pr <- readFile "card.tin"
+  pr0 <- readFile "card.tin"
+  let pr = unlines . takeWhile (/= "exit") . lines $ pr0
   let rules = zip [ "r" <> show i | i <- [1..] ] (assertParse program pr)
-  --demo "r3" rules
+  demo "r3" rules
   let result = compile rules
   mkFile "out.dl" $ result

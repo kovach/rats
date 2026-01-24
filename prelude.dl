@@ -17,22 +17,26 @@ Lt(a,c) :- Lt(a,b), Le(b,c).
 Lt(a,c) :- Le(a,b), Lt(b,c).
 Le(a,b) :- Eq(a,b).
 
-.decl move(id: Term, it: Term, to: Term) // episode
-.decl at(it: Term, at: Term, t: Time)  // not an episode: position at time t
+Lt(a, $Top()) :- Lt(a, _).
+Lt(a, $Top()) :- Lt(_, a).
+
+// .decl move(id: Term, it: Term, to: Term)
+.decl at(it: Term, at: Term, t: Time) .output at
 .decl MoveBefore(id: Term, it: Term, t: Time)
 .decl NotLast(id: Term, it: Term, t: Time)
-.decl Last(id: Term, it: Term, t: Time) .output Last
+.decl Last(id: Term, it: Term, t: Time)
 .decl LastPosition(it: Term, at: Term, t: Time)
-MoveBefore(id, it, t) :- move(id, it, _), Le($R(id), t).
+.decl Nowhere(it: Term, t: Time) .output Nowhere
 
+MoveBefore(id, it, t) :- move(id, it, _), Le($R(id), t).
 NotLast(id1, it, t) :-
   MoveBefore(id1, it, t),
   MoveBefore(id2, it, t),
   Lt($R(id1), $L(id2)).
 Last(id, it, t) :- MoveBefore(id, it, t), !NotLast(id, it, t).
 LastPosition(it, at, t) :- Last(id, it, t), move(id, _, at).
-
-at(it, at, t) :- LastPosition(it, at, t), 1 = count : { LastPosition(it, _, t) }.
+at(it, at, t) :- t = $Top(), LastPosition(it, at, t), 1 = count : { LastPosition(it, _, t) }.
+Nowhere(it, t) :- t = $Top(), LastPosition(it, _, t), C = count : { LastPosition(it, _, t) }, C > 1.
 
 
 // todo

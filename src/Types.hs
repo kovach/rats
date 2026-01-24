@@ -22,8 +22,10 @@ data T = L Term | R Term | Min T T | Max T T | Top
 data I = I T T deriving (Show, Eq, Ord)
 data Term = TermPred Pred
           | TermVar Var
+          | TermFreshVar String
           | TermId Id
           | TermAfter Term
+          | TermExt String
   deriving (Show, Eq, Ord)
 
 data Op = OpLt | OpLe deriving (Show, Eq, Ord)
@@ -33,7 +35,6 @@ data AtomType
   | AtomPos
   deriving (Show, Eq, Ord)
 
-data BasePred = BaseLe | BaseLt
 data Pattern
   = Pattern { ty :: AtomType, terms :: [Term] }
   | IdPattern { id :: Term, terms :: [Term] }
@@ -105,6 +106,8 @@ instance PP Term where
   pp (TermPred p) = pp p
   pp (TermId i) = pp i
   pp (TermAfter i) = ">" <> pp i
+  pp (TermFreshVar v) = "!" <> v
+  pp (TermExt s) = s
 instance PP Pattern where
   pp (Pattern AtomDuring c) = "?" <> (pwrap . unwords . map pp $ c)
   pp (Pattern AtomAfter c) = ">" <> (pwrap . unwords . map pp $ c)

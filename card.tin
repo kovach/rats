@@ -1,0 +1,10 @@
+!setup.
+
+?setup / (
+  (!card !C / !name !N | !cost !Cost) |
+  (!card !C2 / !name !N2)
+).
+
+(?card _ / (?name _ | ?cost _)), !foo.
+(?card _ / ?name _), !bar.
+

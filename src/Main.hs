@@ -38,13 +38,19 @@ predString (Pred s) = s
 predPattern :: Pattern -> Maybe Pred
 predPattern (Pattern _ (TermPred p : _)) = Just p
 predPattern _ = Nothing
-pVars (Pattern _ ts) = varTerms ts
-pVars (IdPattern i ts) = varTerms (i:ts)
-pVars (Cmp _ a b) = tVars a <> tVars b
+patternVars (Pattern _ ts) = varTerms ts
+patternVars (IdPattern i ts) = varTerms (i:ts)
+patternVars (Cmp _ a b) = tVars a <> tVars b
+patternVars (IsId t) = termVars t
 varTerms = concatMap termVars
-termVars (TermVar v) = [v]
+termVars (TermVar (Var v)) = [Var v]
+termVars (TermVar (CVar v)) = [CVar v]
+termVars (TermVar _) = []
 termVars (TermId (Id _ vs)) = vs
-termVars _ = []
+termVars (TermPred {}) = []
+termVars (TermAfter {}) = []
+termVars (TermFreshVar {}) = []
+termVars (TermExt _) = []
 tVars (L t) = termVars t
 tVars (R t) = termVars t
 tVars (Min a b) = tVars a <> tVars b
@@ -55,26 +61,32 @@ pattern Lt a b = Cmp OpLt a b
 pattern Le a b = Cmp OpLe a b
 pattern IdAtom i ts = Atom (IdPattern i ts)
 
-eTraverse :: Applicative m => (Pattern -> m E) -> E -> m E
+eTraverse :: Applicative m => (E -> m E) -> E -> m E
 eTraverse f = go
   where
-    go (Atom p) = f p
+    go e@(Atom _) = f e
     go (And a b) = And <$> (go a) <*> (go b)
     go (Seq a b) = Seq <$> (go a) <*> (go b)
     go (Par a b) = Par <$> (go a) <*> (go b)
     go (Over a b) = Over <$> (go a) <*> (go b)
 
-eFoldM :: Monad m => (E -> m E) -> E -> m E
-eFoldM f = go
+eTermTraverse :: forall m. Applicative m => (Term -> m Term) -> E -> m E
+eTermTraverse f = eTraverse go
   where
-    go a@(Atom{}) = f a
-    go (And a b)  = do a' <- go a; b' <- go b; f $ And a' b'
-    go (Seq a b)  = do a' <- go a; b' <- go b; f $ Seq a' b'
-    go (Par a b)  = do a' <- go a; b' <- go b; f $ Par a' b'
-    go (Over a b) = do a' <- go a; b' <- go b; f $ Over a' b'
+    go :: E -> m E
+    go (Atom (Pattern ty ts)) =
+      (\ts' -> Atom (Pattern ty ts')) <$>
+        (sequenceA $ map (termTraverse f) ts)
+    go (Atom (IdPattern i ts)) =
+      (\ts' -> Atom (IdPattern i ts')) <$>
+        (sequenceA $ map (termTraverse f) ts)
+    go e = pure e
 
--- emap :: (E -> E) -> E -> E
--- emap f = runIdentity . eFoldM (pure . f)
+termTraverse :: Applicative m => (Term -> m Term) -> Term -> m Term
+termTraverse f = go
+  where
+    go (TermAfter t) = TermAfter <$> go t
+    go t = f t
 
 negUnary x = Atom (Pattern AtomDuring [TermPred (Pred x)])
 posUnary x = Atom (Pattern AtomPos [TermPred (Pred x)])
@@ -82,39 +94,50 @@ posUnary x = Atom (Pattern AtomPos [TermPred (Pred x)])
 freshAtomVar p | Just pr <- predPattern p = fresh $ capitalize $ predString pr
 freshAtomVar _ = fresh "_id"
 
+idConstructor ruleName p vs = do
+  m <- freshAtomVar p
+  pure $ Id (ruleName <> ":__" <> m) vs
+
 vars :: E -> [Var]
 vars = execWriter . eTraverse go
   where
-    go p = do tell (pVars p); pure (Atom p)
+    go (Atom p) = do tell (patternVars p); pure (Atom p)
+    go e = pure e
 
 schema :: E -> [(Pred, Int)]
 schema = execWriter . eTraverse go
   where
-    go p@(P _ pr ts) = do tell [(pr, length ts)]; pure (Atom p)
-    go p@(PI pr _ ts) = do tell [(pr, length ts)]; pure (Atom p)
-    go p = pure (Atom p)
+    go e@(Atom (P _ pr ts)) = do tell [(pr, length ts)]; pure e
+    go e@(Atom (PI pr _ ts)) = do tell [(pr, length ts)]; pure e
+    go e = pure e
 
 
 elabNeg = eTraverse go
   where
-    go (p@(Pattern AtomDuring ts)) = do
-      m <- freshAtomVar p; pure $ Atom (IdPattern (TermVar (Var m)) ts)
-    go (p@(Pattern AtomAfter ts)) = do
-      m <- freshAtomVar p; pure $ Atom (IdPattern (TermAfter $ TermVar (Var m)) ts)
-    go p = pure (Atom p)
+    go (Atom p@(Pattern AtomDuring ts)) = do
+      m <- freshAtomVar p; pure $ IdAtom (TermVar (Var m)) ts
+    go (Atom p@(Pattern AtomAfter ts)) = do
+      m <- freshAtomVar p; pure $ IdAtom (TermAfter $ TermVar (Var m)) ts
+    go e = pure e
 
 elabPos ruleName e = eTraverse go e
   where
     vs = vars e
-    go p@(Pattern AtomPos ts) = do
-      m <- freshAtomVar p;
-      let i = Id (ruleName <> ":" <> m) vs
+    go (Atom p@(Pattern AtomPos ts)) = do
+      i <- idConstructor ruleName p vs
       pure (IdAtom (TermId i) ts)
-    go p = pure (Atom p)
+    go e = pure e
+
+elabPosVar ruleName e = eTermTraverse go e
+  where
+    vs = vars e
+    go (TermFreshVar v) = pure $
+      TermId $ Id (ruleName <> ":" <> v) vs
+    go e = pure e
 
 type Rule = (Name, E)
 
-elabNegPos r = elabNeg >=> elabPos r
+elabNegPos r = elabNeg >=> elabPos r >=> elabPosVar r
 elab = evalM . uncurry elabNegPos
 
 elabAll :: [Rule] -> [E]
@@ -145,7 +168,7 @@ check (Over a b) = do
   I al ar <- check a
   I bl br <- check b
   tell [al `Lt` bl, br `Lt` ar]
-  pure $ I al br
+  pure $ I al ar
 
 checkAll :: E -> [Pattern]
 checkAll = snd . runWriter . check
@@ -203,7 +226,7 @@ ruleCompile (body, h) =
     <> "\n."
 
 schemaCompile (p, arity) =
-  ".decl " <> pp p <> args (replicate (arity+1) "x:Term")
+  ".decl " <> pp p <> args (map (\i -> "x" <> show i <> ":Term") [1..(arity+1)])
   <> " .output " <> pp p
 
 patternCompile1 = (<> ".") . patternCompile
@@ -222,6 +245,9 @@ termCompile = \case
   TermPred pr -> cons "TermPred" [pp pr]
   TermId i -> cons "TermId" [compileId i]
   TermAfter t -> termCompile t
+  TermFreshVar _ -> error ""
+  TermExt "$" -> cons "TermNum" ["autoinc()"]
+  TermExt _ -> error "unhandled"
 compileId (Id n vs) = cons "Id" [show n, toBinding vs]
 toBinding [] = cons "Nil" []
 toBinding (t:ts) = cons "Bind" [pp t, toBinding ts]
@@ -238,9 +264,11 @@ mkFile path p = do
   writeFile path $ prelude <> p
 
 exp = assertParse expr
+exp' = assertParse (expr <* ws <* char '.')
 
 --
 -- Example:
+
 -- `a` and 2 `b`s that overlap:
 e_ab = assertParse expr "!a, !b, !b" -- ands [posUnary "a", posUnary "b", posUnary "b"]
 -- an `a` that encloses `a` b:
@@ -255,10 +283,10 @@ rules =
   [ ("r", e_cd)
   , ("ab", e_ab)
   , ("a/b", e_ab')
-  , ("foo", exp ">d, !e")
+  , ("foo", exp ">d, !e !E")
   ]
 
-demo name = do
+demo name rules = do
   let f = (name, fromJust $ lookup name rules)
   pprint $ snd f
   putStrLn "~~~~~~~~~"
@@ -272,7 +300,8 @@ demo name = do
   putStrLn "~~~~~~~~~"
 
 main = do
-  demo "foo"
-
+  pr <- readFile "card.tin"
+  let rules = zip [ "r" <> show i | i <- [1..] ] (assertParse program pr)
+  demo "r3" rules
   let result = compile rules
   mkFile "out.dl" $ result

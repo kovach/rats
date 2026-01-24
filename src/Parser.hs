@@ -19,10 +19,12 @@ var = b <|> v <|> cv
     cv = T.CVar <$> (char '?' *> variable)
 
 term :: Parser T.Term
-term = v <|> p
+term = fv <|> v <|> p <|> rand
   where
     v = (T.TermVar <$> var)
     p = (T.TermPred <$> pred)
+    fv = T.TermFreshVar <$> (char '!' *> variable)
+    rand = pure (T.TermExt "$") <* char '$'
     --af = T.TermAfter . T.TermPred <$> (char '>' *> pred)
 
 pattern :: Parser T.Pattern
@@ -36,9 +38,9 @@ expr1 :: Parser T.E
 expr1 = at <|> p
   where
     at = T.Atom <$> pattern
-    p = parens $ expr2
+    p = parens $ expr
 expr2 :: Parser T.E
-expr2 = ands <|> seqs <|> par <|> expr1
+expr2 = ands <|> seqs <|> pars <|> expr1
   where
     ands =
       (uncurry T.And <$> sep2 (char ',') expr1 expr2)
@@ -46,7 +48,9 @@ expr2 = ands <|> seqs <|> par <|> expr1
     seqs =
       (uncurry T.Seq <$> sep2 (char ';') expr1 expr2)
       <|> (uncurry T.Seq <$> sep2 (char ';') expr1 seqs)
-    par = uncurry T.Par <$> sep2 (char '|') expr1 expr2
+    pars =
+      (uncurry T.Par <$> sep2 (char '|') expr1 expr2)
+      <|> (uncurry T.Par <$> sep2 (char '|') expr1 pars)
 expr3 :: Parser T.E
 expr3 = over <|> expr2
   where

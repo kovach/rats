@@ -5,6 +5,7 @@
               | Bind { val: Term, rest: Binding }
 .type Term = TermPred { x: symbol }
            | TermId { x: Id }
+           | TermNum { x: number }
 .type Time = L { x: Term } | R { x: Term } | Top {}
 
 .decl Lt(a: Time, b: Time)
@@ -15,3 +16,9 @@ Le(a,b) :- Lt(a,b).
 Lt(a,c) :- Lt(a,b), Le(b,c).
 Lt(a,c) :- Le(a,b), Lt(b,c).
 Le(a,b) :- Eq(a,b).
+
+// todo
+.decl AA(a: number)
+.decl AAA(a: Term)
+AA(autoinc()) :- Le(a,b).
+AAA($TermNum(a)) :- AA(a).

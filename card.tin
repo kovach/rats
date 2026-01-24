@@ -1,10 +1,17 @@
-!setup.
+!game.
+
+?game / (!setup; !turn).
 
 ?setup / (
-  (!card !C / !name !N | !cost !Cost) |
-  (!card !C2 / !name !N2)
+  (!card / (!name !N1 | !action)) |
+  (!card / !name !N2 | !treasure)
 ).
 
-(?card _ / (?name _ | ?cost _)), !foo.
-(?card _ / ?name _), !bar.
+?turn / (
+  (>?card | !asdf)
+).
 
+(?card / ?name _) ~ !bar.
+
+>(?card / ?action) / !ok.
+>(?card / ?treasure) / !ok2.

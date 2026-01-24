@@ -59,16 +59,19 @@ tVars Top = []
 
 pattern Lt a b = Cmp OpLt a b
 pattern Le a b = Cmp OpLe a b
+pattern Eql a b = Cmp OpEq a b
 pattern IdAtom i ts = Atom (IdPattern i ts)
 
 eTraverse :: Applicative m => (E -> m E) -> E -> m E
 eTraverse f = go
   where
     go e@(Atom _) = f e
+    go (After e) = After <$> go e
     go (And a b) = And <$> (go a) <*> (go b)
     go (Seq a b) = Seq <$> (go a) <*> (go b)
     go (Par a b) = Par <$> (go a) <*> (go b)
     go (Over a b) = Over <$> (go a) <*> (go b)
+    go (Same a b) = Same <$> (go a) <*> (go b)
 
 eTermTraverse :: forall m. Applicative m => (Term -> m Term) -> E -> m E
 eTermTraverse f = eTraverse go
@@ -126,14 +129,14 @@ elabPos ruleName e = eTraverse go e
     go (Atom p@(Pattern AtomPos ts)) = do
       i <- idConstructor ruleName p vs
       pure (IdAtom (TermId i) ts)
-    go e = pure e
+    go e' = pure e'
 
 elabPosVar ruleName e = eTermTraverse go e
   where
     vs = vars e
     go (TermFreshVar v) = pure $
       TermId $ Id (ruleName <> ":" <> v) vs
-    go e = pure e
+    go e' = pure e'
 
 type Rule = (Name, E)
 
@@ -150,6 +153,9 @@ check (Atom p@(IdPattern i _)) = do
   tell [p, Lt (leftEnd i) (rightEnd i)];
   pure (I (leftEnd i) (rightEnd i))
 check (Atom p) = error $ pp p
+check (After e) = do
+  I _ ar <- check e
+  pure $ I ar Top
 check (Par a b) = do
   I al ar <- check a
   I bl br <- check b
@@ -168,6 +174,11 @@ check (Over a b) = do
   I al ar <- check a
   I bl br <- check b
   tell [al `Lt` bl, br `Lt` ar]
+  pure $ I al ar
+check (Same a b) = do
+  I al ar <- check a
+  I bl br <- check b
+  tell [al `Eql` bl, br `Eql` ar]
   pure $ I al ar
 
 checkAll :: E -> [Pattern]
@@ -239,6 +250,7 @@ patternCompile = \case
   Pattern {} -> error ""
 opString OpLt = "Lt"
 opString OpLe = "Le"
+opString OpEq = "Eq"
 termCompile :: Term -> String
 termCompile = \case
   TermVar v -> pp v -- !

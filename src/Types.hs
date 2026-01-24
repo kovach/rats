@@ -28,7 +28,7 @@ data Term = TermPred Pred
           | TermExt String
   deriving (Show, Eq, Ord)
 
-data Op = OpLt | OpLe deriving (Show, Eq, Ord)
+data Op = OpLt | OpLe | OpEq deriving (Show, Eq, Ord)
 data AtomType
   = AtomDuring
   | AtomAfter
@@ -43,14 +43,17 @@ data Pattern
   deriving (Show, Eq, Ord)
 
 data E = Atom Pattern
+       | After E
        | And E E
        | Seq E E
        | Par E E
        | Over E E
+       | Same E E
   deriving (Show, Eq, Ord)
 
 pwrap x = "(" <> x <> ")"
 bwrap x = "[" <> x <> "]"
+spwrap x = " " <> x <> " "
 
 class PP a where
   pp  :: a -> String
@@ -113,12 +116,17 @@ instance PP Pattern where
   pp (Pattern AtomAfter c) = ">" <> (pwrap . unwords . map pp $ c)
   pp (Pattern AtomPos c) = "!" <> (pwrap . unwords . map pp $ c)
   pp (IdPattern i c) = pp i <> ":" <> (pwrap . unwords . map pp $ c)
-  pp (Cmp OpLt a b) = pp a <> " < " <> pp b
-  pp (Cmp OpLe a b) = pp a <> " ≤ " <> pp b
+  pp (Cmp op a b) = pp a <> spwrap (pp op) <> pp b
   pp (IsId t) = "IsId " <> pp t
+instance PP Op where
+  pp OpLt = "<"
+  pp OpLe = "≤"
+  pp OpEq = "="
 instance PP E where
   pp (Atom p) = pp p
+  pp (After e) = ">" <> pp e
   pp (And a b) = pwrap $ pp a <> ", " <> pp b
   pp (Seq a b) = pwrap $ pp a <> "; " <> pp b
   pp (Par a b) = pwrap $ pp a <> " | " <> pp b
   pp (Over a b) = pwrap $ pp a <> " / " <> pp b
+  pp (Same a b) = pwrap $ pp a <> " ~ " <> pp b

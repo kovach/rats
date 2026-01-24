@@ -25,20 +25,20 @@ term = fv <|> v <|> p <|> rand
     p = (T.TermPred <$> pred)
     fv = T.TermFreshVar <$> (char '!' *> variable)
     rand = pure (T.TermExt "$") <* char '$'
-    --af = T.TermAfter . T.TermPred <$> (char '>' *> pred)
 
 pattern :: Parser T.Pattern
-pattern = q <|> a <|> af
+pattern = q <|> a
   where
     q = T.Pattern T.AtomDuring <$> (char '?' *> wsSep term)
     a = T.Pattern T.AtomPos <$> (char '!' *> wsSep term)
-    af = T.Pattern T.AtomAfter <$> (char '>' *> wsSep term)
+    --af = T.Pattern T.AtomAfter <$> (char '>' *> wsSep term)
 
 expr1 :: Parser T.E
-expr1 = at <|> p
+expr1 = at <|> p <|> af
   where
     at = T.Atom <$> pattern
     p = parens $ expr
+    af = T.After <$> (char '>' *> ws *> expr1)
 expr2 :: Parser T.E
 expr2 = ands <|> seqs <|> pars <|> expr1
   where
@@ -52,9 +52,10 @@ expr2 = ands <|> seqs <|> pars <|> expr1
       (uncurry T.Par <$> sep2 (char '|') expr1 expr2)
       <|> (uncurry T.Par <$> sep2 (char '|') expr1 pars)
 expr3 :: Parser T.E
-expr3 = over <|> expr2
+expr3 = over <|> same <|> expr2
   where
     over = uncurry T.Over <$> sep2 (char '/') expr2 expr3
+    same = uncurry T.Over <$> sep2 (char '~') expr2 expr3
 
 expr = expr3
 

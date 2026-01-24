@@ -10,9 +10,10 @@ import Control.Monad.Writer
 import Control.Monad.State
 import Control.Monad
 import Data.Monoid (Sum(..))
+import Data.List
 import Data.Maybe
 import Data.Functor.Identity
-import Data.List
+import Data.Either
 import Data.Set (Set)
 import qualified Data.Set as Set
 
@@ -153,6 +154,7 @@ check (Atom p@(IdPattern i _)) = do
   tell [p, Lt (leftEnd i) (rightEnd i)];
   pure (I (leftEnd i) (rightEnd i))
 check (Atom p) = error $ pp p
+check (Fresh v) = undefined
 check (After e) = do
   I _ ar <- check e
   pure $ I ar Top
@@ -217,13 +219,16 @@ splitConstraints x =
 
 chk = splitConstraints . expandConstraints . checkAll
 
-compile :: [(Name, E)] -> String
-compile ps =
-  let sch = nub $ concatMap (schema . snd) ps
-  in
-    unlines $
-      map schemaCompile sch
-      <> map (ruleCompile . chk . elab) ps
+compile :: [(Name, Statement)] -> String
+compile ps = result
+  where
+    (ops, es) = partitionEithers $ map isOp ps
+    isOp (_, Pragma p) = Left p
+    isOp (n, Rule e) = Right (n,e)
+    sch = nub $ concatMap (schema . snd) es
+    result = unlines $
+      map (schemaCompile ops) sch
+      <> map (ruleCompile . chk . elab) es
 
 commas = intercalate ", "
 args = pwrap . intercalate ", "
@@ -236,9 +241,10 @@ ruleCompile (body, h) =
     <> commas (map patternCompile $ Set.toList body)
     <> "\n."
 
-schemaCompile (p, arity) =
+schemaCompile :: [Pred] -> (Pred, Int) -> String
+schemaCompile countPreds (p, arity) =
   ".decl " <> pp p <> args (map (\i -> "x" <> show i <> ":Term") [1..(arity+1)])
-  <> " .output " <> pp p
+  <> (if p `elem` countPreds then "" else " .output " <> pp p)
 
 patternCompile1 = (<> ".") . patternCompile
 patternCompile :: Pattern -> String
@@ -314,6 +320,6 @@ demo name rules = do
 main = do
   pr <- readFile "card.tin"
   let rules = zip [ "r" <> show i | i <- [1..] ] (assertParse program pr)
-  demo "r3" rules
+  --demo "r3" rules
   let result = compile rules
   mkFile "out.dl" $ result

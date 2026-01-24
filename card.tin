@@ -7,9 +7,18 @@
   (!card / !name !N2 | !treasure)
 ).
 
-?turn / (
-  (>?card | !asdf)
+?turn,
+>(?card / (?name A | ?action)),
+>(?card / (?name B | ?treasure))
+/ (
+  !asdf; !asdf
 ).
+
+#asdf.
+#card.
+#action.
+#treasure.
+#name.
 
 (?card / ?name _) ~ !bar.
 

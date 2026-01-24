@@ -10,9 +10,9 @@ import Data.Set (Set)
 import qualified Data.Set as Set
 import Data.String
 
-data Var = Blank | Var String | CVar String
-  deriving (Show, Eq, Ord)
 type Name = String
+data Var = Blank | Var Name | CVar Name
+  deriving (Show, Eq, Ord)
 data Id = Id Name [Var]
   deriving (Show, Eq, Ord)
 data Pred = Pred String
@@ -24,7 +24,7 @@ data Term = TermPred Pred
           | TermVar Var
           | TermFreshVar String
           | TermId Id
-          | TermAfter Term
+          | TermAfter Term -- todo remove
           | TermExt String
   deriving (Show, Eq, Ord)
 
@@ -44,11 +44,15 @@ data Pattern
 
 data E = Atom Pattern
        | After E
+       | Fresh Name
        | And E E
        | Seq E E
        | Par E E
        | Over E E
        | Same E E
+  deriving (Show, Eq, Ord)
+
+data Statement = Pragma Pred | Rule E
   deriving (Show, Eq, Ord)
 
 pwrap x = "(" <> x <> ")"
@@ -124,6 +128,7 @@ instance PP Op where
   pp OpEq = "="
 instance PP E where
   pp (Atom p) = pp p
+  pp (Fresh n) = "!" <> n
   pp (After e) = ">" <> pp e
   pp (And a b) = pwrap $ pp a <> ", " <> pp b
   pp (Seq a b) = pwrap $ pp a <> "; " <> pp b

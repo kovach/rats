@@ -59,4 +59,8 @@ expr3 = over <|> same <|> expr2
 
 expr = expr3
 
-program = many (ws *> expr <* ws <* char '.') <* ws
+pragma = count
+  where
+    count = char '#' *> (pred)
+
+program = many (ws *> (T.Pragma <$> pragma) <|> (T.Rule <$> expr) <* ws <* char '.') <* ws

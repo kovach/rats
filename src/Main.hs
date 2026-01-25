@@ -104,13 +104,13 @@ idConstructor ruleName p vs = do
   pure $ Id (ruleName <> ":__" <> m) vs
 
 vars :: E -> [Var]
-vars = execWriter . eTraverse' go
+vars = nub . execWriter . eTraverse' go
   where
     go (Atom p) = tell (patternVars p)
     go _ = pure ()
 
 posVars :: E -> [Var]
-posVars = execWriter . eTraverse' go
+posVars = nub . execWriter . eTraverse' go
   where
     go (Atom (Pattern AtomPos (PVar2 v _ _) _)) = tell [v]
     go _ = pure ()
@@ -199,8 +199,8 @@ checkAll = snd . runWriter . check
 
 -- expand and simplify constrains:
 expandConstraint :: Pattern -> [Pattern]
-expandConstraint (Cmp op (Max a b) c) = expandConstraints [Cmp op a c, Cmp op b c]
-expandConstraint (Cmp op a (Min b c)) = expandConstraints [Cmp op a b, Cmp op a c]
+expandConstraint (Cmp op (Max a b) c) | opIneq op = expandConstraints [Cmp op a c, Cmp op b c]
+expandConstraint (Cmp op a (Min b c)) | opIneq op = expandConstraints [Cmp op a b, Cmp op a c]
 expandConstraint (Cmp _ _ Top) = []
 expandConstraint p@(Cmp _ (Min _ _) _) = error $ pp p  -- no disjunctive comparisons
 expandConstraint p@(Cmp _ _ (Max _ _)) = error $ pp p  -- no disjunctive comparisons
@@ -276,6 +276,7 @@ patternCompile = \case
   IsId t -> "IsId" <> pwrap (termCompile t)
 opString OpLt = "Lt"
 opString OpLe = "Le"
+opString OpEq = "Eq"
 termCompile :: Term -> String
 termCompile = \case
   TermVar v -> pp v
@@ -344,6 +345,6 @@ main = do
   pr0 <- readFile "card.tin"
   let pr = unlines . takeWhile (/= "exit") . lines $ pr0
   let rules = zip [ "r" <> show i | i <- [1..] ] (assertParse program pr)
-  demo "r3" rules
+  demo "r5" rules
   let result = compile rules
   mkFile "out.dl" $ result

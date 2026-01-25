@@ -38,6 +38,8 @@ LastPosition(it, at, t) :- Last(id, it, t), move(id, _, at).
 at(it, at, t) :- t = $Top(), LastPosition(it, at, t), 1 = count : { LastPosition(it, _, t) }.
 Nowhere(it, t) :- t = $Top(), LastPosition(it, _, t), C = count : { LastPosition(it, _, t) }, C > 1.
 
+.decl TotalLe(i: number) .output TotalLe
+TotalLe(i) :- i = count : Le(_, _).
 
 // todo
 //.decl AA(a: number)

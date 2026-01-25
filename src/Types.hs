@@ -30,6 +30,10 @@ data Term = TermPred Pred
   deriving (Show, Eq, Ord)
 
 data Op = OpLt | OpLe | OpEq deriving (Show, Eq, Ord)
+opIneq = \case
+  OpLt -> True
+  OpLe -> True
+  OpEq -> False
 data AtomType
   = AtomNeg
   | AtomPos

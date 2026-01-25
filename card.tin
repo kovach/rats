@@ -1,21 +1,21 @@
 !game.
 !move foo bar.
 
-?game / (!setup; !turn ~ !initial_turn).
+?game /
+  !setup; (!turn ~ !initial_turn).
 
 ?setup / (
-  (!card / !name village | !action) |
-  (!card / !name gold | !treasure) |
+  !card / !name village ~ !action |
+  !card / !name gold ~ !treasure |
   !place !P
 ).
 
-
->?place P |
->(?card / (?name A | ?action)) |
->(?card / (?name B | ?treasure)) |
-( ?initial_turn / (
+?place P |
+?card / ?name A ~ ?action |
+?card / ?name B ~ ?treasure |
+?initial_turn / (
   !move A P | !move B A
-)).
+).
 
 #card.
 #action.

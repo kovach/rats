@@ -31,7 +31,6 @@ pattern = q <|> a
   where
     q = T.Pattern T.AtomNeg T.PVar0 <$> (char '?' *> wsSep term)
     a = T.Pattern T.AtomPos T.PVar0 <$> (char '!' *> wsSep term)
-    --af = T.Pattern T.AtomAfter <$> (char '>' *> wsSep term)
 
 expr1 :: Parser T.E
 expr1 = at <|> p <|> af
@@ -40,24 +39,21 @@ expr1 = at <|> p <|> af
     p = parens $ expr
     af = T.After <$> (char '>' *> ws *> expr1)
 expr2 :: Parser T.E
-expr2 = ands <|> seqs <|> pars <|> expr1
+expr2 = and_ <|> seq_ <|> expr1
   where
-    ands =
-      (uncurry T.And <$> sep2 (char ',') expr1 expr2)
-      <|> (uncurry T.And <$> sep2 (char ',') expr1 ands)
-    seqs =
-      (uncurry T.Seq <$> sep2 (char ';') expr1 expr2)
-      <|> (uncurry T.Seq <$> sep2 (char ';') expr1 seqs)
-    pars =
-      (uncurry T.Par <$> sep2 (char '|') expr1 expr2)
-      <|> (uncurry T.Par <$> sep2 (char '|') expr1 pars)
+    and_ = uncurry T.And <$> sep2 (char ',') expr1 expr2
+    seq_ = uncurry T.Seq <$> sep2 (char ';') expr1 expr2
 expr3 :: Parser T.E
 expr3 = over <|> same <|> expr2
   where
     over = uncurry T.Over <$> sep2 (char '/') expr2 expr3
-    same = uncurry T.Over <$> sep2 (char '~') expr2 expr3
+    same = (uncurry T.Same <$> sep2 (char '~') expr2 expr3)
+expr4 :: Parser T.E
+expr4 = par <|> expr3
+  where
+    par = uncurry T.Par <$> sep2 (char '|') expr3 expr4
 
-expr = expr3
+expr = expr4
 
 pragma = count
   where

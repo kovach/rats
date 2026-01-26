@@ -22,11 +22,12 @@ data T = L Term | R Term | Min T T | Max T T | Top
   deriving (Show, Eq, Ord)
 data I = I T T deriving (Show, Eq, Ord)
 data Term = TermPred Pred
-          | TermVar Var
-          | TermFreshVar String
           | TermId Id
-          | TermExt String
+          | TermVar Var
+          | TermFreshVar Var
+          | TermChoiceVar (Maybe Var) Var
           | TermBlank
+          | TermExt String
   deriving (Show, Eq, Ord)
 
 data Op = OpLt | OpLe | OpEq deriving (Show, Eq, Ord)
@@ -39,6 +40,9 @@ data AtomType
   | AtomPos
   deriving (Show, Eq, Ord)
 
+isPositive AtomPos = True
+isPositive AtomNeg = False
+
 data PVar
   = PVar2 Var [Var] Name
   | PVar0
@@ -49,11 +53,13 @@ data Pattern
   | Cmp Op T T
   | Eq Term Term
   | IsId Term
+  | Val Term Term
   deriving (Show, Eq, Ord)
 
 --pattern IdPattern ty i terms = Pattern ty (Just i) terms
 
 data E = Atom Pattern
+       | Fresh E
        | After E
        | And E E
        | Seq E E
@@ -62,6 +68,7 @@ data E = Atom Pattern
        | Same E E
   deriving (Show, Eq, Ord)
 
+-- todo: generate count summary for each Pragma
 data Statement = Pragma Pred | Rule E
   deriving (Show, Eq, Ord)
 
@@ -98,11 +105,11 @@ evalM m = evalState m M.empty
 
 type MonadFreshVarState m = MonadState (MMap String (Sum Int)) m
 
-fresh :: (MonadFreshVarState m) => String -> m String
+fresh :: (MonadFreshVarState m) => String -> m Var
 fresh t = do
   Sum i <- gets (M.lookup t);
   modify (M.insert t 1)
-  pure $ t <> (if i == 0 then "" else show i)
+  pure $ Var $ t <> show i -- (if i == 0 then "" else show i)
 
 instance IsString Pred where
   fromString = Pred
@@ -121,7 +128,8 @@ instance PP Term where
   pp (TermVar v) = pp v
   pp (TermPred p) = pp p
   pp (TermId i) = pp i
-  pp (TermFreshVar v) = "!" <> v
+  pp (TermFreshVar v) = "!" <> pp v
+  pp (TermChoiceVar _ v) = "?" <> pp v
   pp (TermExt s) = s
   pp TermBlank = "_"
 instance PP AtomType where
@@ -134,6 +142,7 @@ instance PP Pattern where
     <> (pwrap . unwords . map pp $ c)
   pp (Cmp op a b) = pp a <> spwrap (pp op) <> pp b
   pp (Eq a b) = pp a <> spwrap "=" <> pp b
+  pp (Val a b) = "Val " <> pp a <> " " <> pp b
   pp (IsId t) = "IsId " <> pp t
 instance PP Op where
   pp OpLt = "<"

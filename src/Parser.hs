@@ -18,11 +18,12 @@ var = v
     --cv = T.CVar <$> (char '?' *> variable)
 
 term :: Parser T.Term
-term = fv <|> v <|> p <|> rand <|> b
+term = cv <|> fv <|> v <|> p <|> rand <|> b
   where
     v = (T.TermVar <$> var)
     p = (T.TermPred <$> pred)
-    fv = T.TermFreshVar <$> (char '!' *> variable)
+    fv = T.TermFreshVar <$> (char '!' *> var)
+    cv = T.TermChoiceVar Nothing <$> (char '?' *> var)
     rand = pure (T.TermExt "$") <* char '$'
     b = pure T.TermBlank <* char '_'
 

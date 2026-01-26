@@ -5,19 +5,33 @@
   !setup; (!turn ~ !initial_turn).
 
 ?setup / (
-  !card / !name village ~ !action |
-  !card / !name gold ~ !treasure |
+  !card ~ !name village ~ !action |
+  !card ~ !name village ~ !action |
+  !card ~ !name village ~ !action |
+  !card ~ !name gold ~ !treasure |
   !place !P
 ).
 
 ?place P |
-?card / ?name A ~ ?action |
-?card / ?name B ~ ?treasure |
+?card ~ ?name A ~ ?action |
 ?initial_turn / (
-  !move A P | !move B A
+  !move A P
 ).
 
+?place P |
+?card ~ ?name B ~ ?treasure |
+?initial_turn / (
+  !move B P
+).
+
+#choose.
+!choose !C.
+?choose ?C, !f C.
+
+#game.
+#initial_turn.
 #card.
 #action.
 #treasure.
+#place.
 #move.

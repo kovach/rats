@@ -8,6 +8,8 @@
            | TermNum { x: number }
 .type Time = L { x: Term } | R { x: Term } | Top {}
 
+.decl Val(ref: Term, val: Term) .output Val .input Val(rfc4180=true,delimiter=",")
+
 .decl Lt(a: Time, b: Time)
 .decl Le(a: Time, b: Time)
 .decl Eq(a: Time, b: Time) eqrel
@@ -20,7 +22,7 @@ Le(a,b) :- Eq(a,b).
 Lt(a, $Top()) :- Lt(a, _).
 Lt(a, $Top()) :- Lt(_, a).
 
-// .decl move(id: Term, it: Term, to: Term)
+.decl move(id: Term, it: Term, to: Term)
 .decl at(it: Term, at: Term, t: Time) .output at
 .decl MoveBefore(id: Term, it: Term, t: Time)
 .decl NotLast(id: Term, it: Term, t: Time)
@@ -38,8 +40,16 @@ LastPosition(it, at, t) :- Last(id, it, t), move(id, _, at).
 at(it, at, t) :- t = $Top(), LastPosition(it, at, t), 1 = count : { LastPosition(it, _, t) }.
 Nowhere(it, t) :- t = $Top(), LastPosition(it, _, t), C = count : { LastPosition(it, _, t) }, C > 1.
 
-.decl TotalLe(i: number) .output TotalLe
-TotalLe(i) :- i = count : Le(_, _).
+.decl TotalT(points: number, eq: number, lt: number, le: number) .output TotalT
+TotalT(points, eq, lt, le) :-
+  le = count : Le(_, _),
+  eq = count : Eq(_, _),
+  lt = count : Lt(_, _),
+  points = count : Le(_, $Top()).
+
+.output choose(rfc4180=true,delimiter=",")
+
+//Val($TermId($Id("r7:C", $Nil())), $TermNum(3)).
 
 // todo
 //.decl AA(a: number)

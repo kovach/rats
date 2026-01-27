@@ -12,8 +12,15 @@ import qualified Data.Set as Set
 import Data.String
 
 type Name = String
-data Var = Var Name
+data Var = NegVar Name | PosVar Name | ExVar Name
   deriving (Show, Eq, Ord)
+isNegVar = \case NegVar _ -> True; _ -> False
+isPosVar = \case PosVar _ -> True; _ -> False
+isExVar = \case ExVar _ -> True; _ -> False
+varName = \case
+    NegVar v -> v
+    PosVar v -> v
+    ExVar v ->  v
 data Id = Id Name [Var]
   deriving (Show, Eq, Ord)
 data Pred = Pred String
@@ -30,10 +37,11 @@ data Term = TermPred Pred
           | TermExt String
   deriving (Show, Eq, Ord)
 
-data Op = OpLt | OpLe | OpEq deriving (Show, Eq, Ord)
+data Op = OpLt
+        | OpEq
+  deriving (Show, Eq, Ord)
 opIneq = \case
   OpLt -> True
-  OpLe -> True
   OpEq -> False
 data AtomType
   = AtomNeg
@@ -59,7 +67,7 @@ data Pattern
 --pattern IdPattern ty i terms = Pattern ty (Just i) terms
 
 data E = Atom Pattern
-       | Fresh E
+       | EVar Term
        | After E
        | And E E
        | Seq E E
@@ -105,11 +113,11 @@ evalM m = evalState m M.empty
 
 type MonadFreshVarState m = MonadState (MMap String (Sum Int)) m
 
-fresh :: (MonadFreshVarState m) => String -> m Var
+fresh :: (MonadFreshVarState m) => String -> m Name
 fresh t = do
   Sum i <- gets (M.lookup t);
   modify (M.insert t 1)
-  pure $ Var $ t <> show i -- (if i == 0 then "" else show i)
+  pure $ t <> show i -- (if i == 0 then "" else show i)
 
 instance IsString Pred where
   fromString = Pred
@@ -123,7 +131,10 @@ instance PP T where
   pp Top = "⊤"
 instance PP Pred where pp (Pred s) = s
 instance PP Var where
-  pp = \case { Var v -> v }
+  pp = \case
+    NegVar v -> v
+    PosVar v -> v
+    ExVar v -> "-" <> v
 instance PP Term where
   pp (TermVar v) = pp v
   pp (TermPred p) = pp p
@@ -146,13 +157,51 @@ instance PP Pattern where
   pp (IsId t) = "IsId " <> pp t
 instance PP Op where
   pp OpLt = "<"
-  pp OpLe = "≤"
   pp OpEq = "="
 instance PP E where
   pp (Atom p) = pp p
   pp (After e) = ">" <> pp e
+  pp (EVar e) = pp e
   pp (And a b) = pwrap $ pp a <> ", " <> pp b
   pp (Seq a b) = pwrap $ pp a <> "; " <> pp b
   pp (Par a b) = pwrap $ pp a <> " | " <> pp b
   pp (Over a b) = pwrap $ pp a <> " / " <> pp b
   pp (Same a b) = pwrap $ pp a <> " ~ " <> pp b
+
+eTraverse :: Applicative m => (E -> m E) -> E -> m E
+eTraverse f = go
+  where
+    go e@(Atom _) = f e
+    go e@(EVar _) = f e
+    go (After e) = After <$> go e
+    go (And a b) = And <$> (go a) <*> (go b)
+    go (Seq a b) = Seq <$> (go a) <*> (go b)
+    go (Par a b) = Par <$> (go a) <*> (go b)
+    go (Over a b) = Over <$> (go a) <*> (go b)
+    go (Same a b) = Same <$> (go a) <*> (go b)
+
+eTraverse' :: Applicative m => (E -> m ()) -> E -> m ()
+eTraverse' f e0 = eTraverse (\e -> f e *> pure e) e0 *> pure ()
+
+eTermTraverse :: forall m. Applicative m => (Term -> m Term) -> E -> m E
+eTermTraverse f = eTraverse go
+  where
+    go :: E -> m E
+    go (Atom (Pattern ty mv ts)) =
+      (\ts' -> Atom (Pattern ty mv ts')) <$>
+        (sequenceA $ map (termTraverse f) ts)
+    go e = pure e
+
+termTraverse :: Applicative m => (Term -> m Term) -> Term -> m Term
+termTraverse f = go
+  where
+    go t = f t
+
+tTraverse:: Applicative m => (T -> m T) -> T -> m T
+tTraverse f =  go
+  where
+    go t@(L _) = f t
+    go t@(R _) = f t
+    go Top = f Top
+    go (Min a b) = Min <$> go a <*> go b
+    go (Max a b) = Max <$> go a <*> go b

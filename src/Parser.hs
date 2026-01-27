@@ -14,7 +14,7 @@ pred = p
 var :: Parser T.Var
 var = v
   where
-    v = T.Var <$> variable
+    v = T.NegVar <$> variable
     --cv = T.CVar <$> (char '?' *> variable)
 
 term :: Parser T.Term
@@ -34,11 +34,12 @@ pattern = q <|> a
     a = T.Pattern T.AtomPos T.PVar0 <$> (char '!' *> wsSep term)
 
 expr1 :: Parser T.E
-expr1 = at <|> p <|> af
+expr1 = at <|> p <|> af <|> vr
   where
     at = T.Atom <$> pattern
     p = parens $ expr
     af = T.After <$> (char '>' *> ws *> expr1)
+    vr = T.EVar <$> term
 expr2 :: Parser T.E
 expr2 = and_ <|> seq_ <|> expr1
   where

@@ -13,14 +13,22 @@
 .decl Lt(a: Time, b: Time)
 .decl Le(a: Time, b: Time)
 .decl Eq(a: Time, b: Time) eqrel
+.decl IsId(x: Term)
 Le(a,c) :- Le(a,b), Le(b,c).
 Le(a,b) :- Lt(a,b).
 Lt(a,c) :- Lt(a,b), Le(b,c).
 Lt(a,c) :- Le(a,b), Lt(b,c).
 Le(a,b) :- Eq(a,b).
+Eq($L(a),$L(a)) :- IsId(a).
+Eq($R(a),$R(a)) :- IsId(a).
 
 Lt(a, $Top()) :- Lt(a, _).
 Lt(a, $Top()) :- Lt(_, a).
+
+.decl Contains(x: Term, y: Term)
+.decl After(x: Term, y: Term)
+Contains(a, b) :- IsId(a), IsId(b), Lt($L(a), $L(b)), Lt($R(b), $R(a)).
+After(a, b) :- IsId(a), IsId(b), Lt($R(a), $L(b)).
 
 .decl move(id: Term, it: Term, to: Term)
 .decl at(it: Term, at: Term, t: Time) .output at
@@ -40,16 +48,16 @@ LastPosition(it, at, t) :- Last(id, it, t), move(id, _, at).
 at(it, at, t) :- t = $Top(), LastPosition(it, at, t), 1 = count : { LastPosition(it, _, t) }.
 Nowhere(it, t) :- t = $Top(), LastPosition(it, _, t), C = count : { LastPosition(it, _, t) }, C > 1.
 
-.decl TotalT(points: number, eq: number, lt: number, le: number) .output TotalT
-TotalT(points, eq, lt, le) :-
+.decl TotalT(points: number, eq: number, lt: number, le: number, contains_: number, after: number) .output TotalT
+TotalT(points, eq, lt, le, cont, aft) :-
   le = count : Le(_, _),
   eq = count : Eq(_, _),
   lt = count : Lt(_, _),
+  cont = count : Contains(_, _),
+  aft = count : After(_, _),
   points = count : Le(_, $Top()).
 
-.output choose(rfc4180=true,delimiter=",")
-
-//Val($TermId($Id("r7:C", $Nil())), $TermNum(3)).
+// .output choose(rfc4180=true,delimiter=",")
 
 // todo
 //.decl AA(a: number)

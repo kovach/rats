@@ -11,6 +11,8 @@ import Data.Set (Set)
 import qualified Data.Set as Set
 import Data.String
 
+import Basic
+
 type Name = String
 data Var = NegVar Name | PosVar Name | ExVar Name
   deriving (Show, Eq, Ord)
@@ -79,33 +81,6 @@ data E = Atom Pattern
 -- todo: generate count summary for each Pragma
 data Statement = Pragma Pred | Rule E
   deriving (Show, Eq, Ord)
-
-pwrap x = "(" <> x <> ")"
-bwrap x = "[" <> x <> "]"
-spwrap x = " " <> x <> " "
-
-class PP a where
-  pp  :: a -> String
-
-instance (PP a, PP b) => PP (a, b) where
-  pp (a,b) = "(" <> pp a <> ", " <> pp b <> ")"
-
-instance PP a => PP [a] where
-  pp xs = "[" <> intercalate ", " (map pp xs) <> "]"
-
-instance PP a => PP (Set a) where
-  pp xs = "[" <> intercalate ", " (Set.toList $ Set.map pp xs) <> "]"
-
---instance (PP a, Traversable f) => PP (f a) where
---  pp xs = "[" <> intercalate ", " (map pp $ traverse (\a -> [a]) xs) <> "]"
-
-pprint :: PP a => a -> IO ()
-pprint = putStrLn . pp
-
-assert a b | a == b = putStrLn "ok"
-assert a b = error $ "not-equal:\n" <> pp a <> "\n\n" <> pp b
-
-capitalize = map toUpper
 
 type Ms b c a = (State (MMap b c)) a
 type M a = Ms String (Sum Int) a

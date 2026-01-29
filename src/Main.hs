@@ -17,11 +17,16 @@ import Data.Either
 import Data.Set (Set)
 import qualified Data.Set as Set
 import Debug.Trace
+import Data.Set (Set)
+import qualified Data.Set as Set
 
+import Basic
 import Types
 import Parser
 import ParserCombinator
 import MMap (MMap)
+import qualified Derp as D
+import ParseDerp
 
 -- todo: one case
 pattern PP p ts <- Pattern _ _ (TermPred p : ts)
@@ -214,7 +219,7 @@ expandConstraint x = [x]
 expandConstraints :: [Pattern] -> [Pattern]
 expandConstraints = concatMap expandConstraint
 
-quantElimConstraints vs ps = trace "" $ out
+quantElimConstraints vs ps = out
   where
     chk c x = if c then x else error ""
     out' = nub $ rest <> elimAll <> elimEx
@@ -345,9 +350,6 @@ compile ps = result
       map (schemaCompile ops) sch
       <> map compileExp es
 
-commas = intercalate ", "
-args = pwrap . intercalate ", "
-
 mkFile path p = do
   prelude <- readFile "prelude.dl"
   writeFile path $ prelude <> p
@@ -369,11 +371,18 @@ demo name rules = do
       putStrLn "~~~~~~~~~"
     _ -> error ""
 
-main = do
-  pr0 <- readFile "card.tin"
+main1 = do
+  pr0 <- readFile "test.tin"
   let pr = unlines . takeWhile (/= "exit") . lines $ pr0
   let rules = zip [ "r" <> show i | i <- [1..] ] (assertParse program pr)
   --demo "r5" rules
   let result = compile rules
   mkFile "out.dl" $ result
 
+main2 = do
+  input <- readFile "test.derp"
+  let rs = assertParse prog input
+  mapM_ pprint $ D.iterRules rs
+  putStrLn "."
+
+main = main2

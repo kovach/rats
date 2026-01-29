@@ -30,22 +30,44 @@ Lt(a, $Top()) :- Lt(_, a).
 Contains(a, b) :- IsId(a), IsId(b), Lt($L(a), $L(b)), Lt($R(b), $R(a)).
 After(a, b) :- IsId(a), IsId(b), Lt($R(a), $L(b)).
 
+// .decl move(id: Term, it: Term, to: Term)
+// .decl MoveBefore(id: Term, it: Term, t: Time)
+// .decl NotLast(id: Term, it: Term, t: Time)
+// .decl Last(id: Term, it: Term, t: Time)
+// .decl LastPosition(it: Term, at: Term, t: Time)
+// .decl Nowhere(it: Term, t: Time) .output Nowhere
+// .decl at(it: Term, at: Term, t: Time) .output at
+// .decl move_at(move: Term, at: Term)
+//
+// MoveBefore(id, it, t) :- move(id, it, _), Le($R(id), t).
+// NotLast(id1, it, t) :-
+//   MoveBefore(id1, it, t),
+//   MoveBefore(id2, it, t),
+//   Lt($R(id1), $L(id2)).
+// Last(id, it, t) :- MoveBefore(id, it, t), !NotLast(id, it, t).
+// LastPosition(it, at, t) :- Last(id, it, t), move(id, _, at).
+// at(it, at, t) :- t = $Top(), LastPosition(it, at, t), 1 = count : { LastPosition(it, _, t) }.
+// Nowhere(it, t) :- t = $Top(), LastPosition(it, _, t), C = count : { LastPosition(it, _, t) }, C > 1.
+
 .decl move(id: Term, it: Term, to: Term)
-.decl at(it: Term, at: Term, t: Time) .output at
 .decl MoveBefore(id: Term, it: Term, t: Time)
 .decl NotLast(id: Term, it: Term, t: Time)
 .decl Last(id: Term, it: Term, t: Time)
 .decl LastPosition(it: Term, at: Term, t: Time)
 .decl Nowhere(it: Term, t: Time) .output Nowhere
+.decl at(id: Term) .output at
+.decl at_pos(id: Term, it: Term, at: Term)
+.decl move_at(move: Term, at: Term)
 
+at(t), move_at(m, t), Eq($L(t), $R(m)) :- move(m, _, _), t=$TermId($Id("move_at", $Bind(m, $Nil()))).
+at_pos(t, it, at) :- at(t), move_at(m, t), move(m, it, at).
 MoveBefore(id, it, t) :- move(id, it, _), Le($R(id), t).
 NotLast(id1, it, t) :-
   MoveBefore(id1, it, t),
   MoveBefore(id2, it, t),
   Lt($R(id1), $L(id2)).
 Last(id, it, t) :- MoveBefore(id, it, t), !NotLast(id, it, t).
-LastPosition(it, at, t) :- Last(id, it, t), move(id, _, at).
-at(it, at, t) :- t = $Top(), LastPosition(it, at, t), 1 = count : { LastPosition(it, _, t) }.
+Lt($L(t), $R(at)) :- IsId(t), Last(move, it, t), move_at(move, at), at_pos(at, it, at).
 Nowhere(it, t) :- t = $Top(), LastPosition(it, _, t), C = count : { LastPosition(it, _, t) }, C > 1.
 
 .decl TotalT(points: number, eq: number, lt: number, le: number, contains_: number, after: number) .output TotalT

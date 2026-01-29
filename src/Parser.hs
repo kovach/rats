@@ -20,15 +20,15 @@ var = v
 term :: Parser T.Term
 term = cv <|> fv <|> v <|> p <|> rand <|> b
   where
-    v = (T.TermVar <$> var)
-    p = (T.TermPred <$> pred)
+    v = T.TermVar <$> var
+    p = T.TermPred <$> pred
     fv = T.TermFreshVar <$> (char '!' *> var)
     cv = T.TermChoiceVar Nothing <$> (char '?' *> var)
     rand = pure (T.TermExt "$") <* char '$'
     b = pure T.TermBlank <* char '_'
 
-pattern :: Parser T.Pattern
-pattern = q <|> a
+pattern_ :: Parser T.Pattern
+pattern_ = q <|> a
   where
     q = T.Pattern T.AtomNeg T.PVar0 <$> (char '?' *> wsSep term)
     a = T.Pattern T.AtomPos T.PVar0 <$> (char '!' *> wsSep term)
@@ -36,7 +36,7 @@ pattern = q <|> a
 expr1 :: Parser T.E
 expr1 = at <|> p <|> af <|> vr
   where
-    at = T.Atom <$> pattern
+    at = T.Atom <$> pattern_
     p = parens $ expr
     af = T.After <$> (char '>' *> ws *> expr1)
     vr = T.EVar <$> term
@@ -61,4 +61,4 @@ pragma = count
   where
     count = char '#' *> (pred)
 
-program = many (ws *> (T.Pragma <$> pragma) <|> (T.Rule <$> expr) <* ws <* char '.') <* ws
+program = dotTerm ((T.Pragma <$> pragma) <|> (T.Rule <$> expr))

@@ -1,0 +1,9 @@
+num A -- eq A A.
+num A, X = t(A) -- foo bar(A) bar(X).
+eq A B -- le A B.
+lt A B -- le A B.
+le A B, le B C -- le A C.
+le A B, lt B C -- lt A C.
+lt A B, le B C -- lt A C.
+-- lt 1 3, lt 2 4, lt 3 4.
+-- num 1, num 2, num 3, num 4, num 5.

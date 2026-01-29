@@ -81,10 +81,10 @@ lower = charMatch "lower case character" isLower
 upper = charMatch "upper case character" isUpper
 alphaNum = charMatch "alphanumeric" isAlphaNum
 digit = charMatch "alphanumeric" isDigit
-idChar = charMatch "alpha num -/_" isIdChar
+idChar = charMatch "alpha num -/_'" isIdChar
   where
     isIdChar c = case c of
-      '-' -> True; '/' -> True; '_' -> True
+      '-' -> True; '/' -> True; '_' -> True; '\'' -> True;
       _ -> isAlphaNum c
 
 nat :: Parser Int
@@ -137,7 +137,7 @@ commaSep' = sepByTrailing (char ',' *> ws)
 commaSep1' x = let sep = (char ',' *> ws) in (sepBy1 sep x <* optional sep)
 wsSep = sepBy ws1
 sep2 sep p q = both p (ws *> sep *> ws *> q)
-
+dotTerm p = many (ws *> p <* ws <* char '.') <* ws
 
 brackets x = char '[' *> ws *> x <* ws <* char ']'
 bbrackets x = string "[[" *> ws *> x <* ws <* string "]]"
@@ -154,3 +154,4 @@ predicate = (singleton <$> (lower <|> char '@')) <> many idChar
 variable =
   (single upper <> many idChar) <|>
   (single (char '_') <> many1 idChar)
+

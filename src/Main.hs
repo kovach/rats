@@ -17,8 +17,6 @@ import Data.Either
 import Data.Set (Set)
 import qualified Data.Set as Set
 import Debug.Trace
-import Data.Set (Set)
-import qualified Data.Set as Set
 
 import Basic
 import Types
@@ -86,10 +84,10 @@ patternBoundVars = filter isNegVar . nub . execWriter . eTraverse' go
     go _ = pure ()
 
 schema :: E -> [(Pred, Int)]
-schema = execWriter . eTraverse go
+schema = execWriter . eTraverse' go
   where
-    go e@(Atom (PP pr ts)) = do tell [(pr, length ts)]; pure e
-    go e = pure e
+    go e@(Atom (PP pr ts)) = do tell [(pr, length ts)]
+    go e = pure ()
 
 elabCVars = eTermTraverse go
   where
@@ -382,7 +380,12 @@ main1 = do
 main2 = do
   input <- readFile "test.derp"
   let rs = assertParse prog input
-  mapM_ pprint $ D.iterRules rs
+  print rs
+  let (out) = D.iterRules rs
+  --mapM_ pprint $ out
+  --pprint $ neg
+  putStrLn "result:"
+  mapM_ pprint $ out
   putStrLn "."
 
 main = main2

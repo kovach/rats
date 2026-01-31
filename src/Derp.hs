@@ -3,9 +3,14 @@ module Derp where
 
 import Data.Maybe
 import Control.Monad hiding (join)
-import Data.Set (Set)
 import Data.List
+import Data.Either
+import Data.Set (Set)
 import qualified Data.Set as Set
+import Data.Map (Map)
+import qualified Data.Map as Map
+import Control.Monad.Writer
+import Debug.Trace
 
 import Basic
 import qualified Binding as B
@@ -24,13 +29,68 @@ data Term
   deriving (Show, Eq, Ord)
 
 data E
-  = Join E E
-  | Leaf [Term]
+  = Atom Tuple
+  | NegAtom Tuple
   | Bind Name Term
+  | Join E E
   | Unit
   deriving (Show, Eq, Ord)
 
-type Binding = B.Binding Name Term
+join Unit x = x
+join x Unit = x
+join x y = Join x y
+
+atom [] = Unit
+atom t = Atom t
+
+simplify = \case
+  Join a b -> join (simplify a) (simplify b)
+  Atom at -> atom at
+  x -> x
+
+joins :: Foldable f => f Tuple -> E
+joins = foldr (\x acc -> join (atom x) acc) Unit
+joins' :: Foldable f => f E -> E
+joins' = foldr (\x acc -> join x acc) Unit
+
+eTraverse :: Applicative m => (E -> m E) -> E -> m E
+eTraverse f = go
+  where
+    go e@(Atom _) = f e
+    go e@(NegAtom _) = f e
+    go e@Unit = f e
+    go e@(Bind _ _) = f e
+    go (Join a b) = Join <$> (go a) <*> (go b)
+
+eTraverse' :: Applicative m => (E -> m ()) -> E -> m ()
+eTraverse' f e0 = eTraverse (\e -> f e *> pure e) e0 *> pure ()
+
+findNegations = execWriter . eTraverse' go
+  where
+    go (NegAtom t) = tell [t]
+    go _ = pure ()
+
+type Neg = Map Tuple [Tuple]
+data Binding = Binding { bind :: B.Binding Name Term, bdeps :: [Tuple] }
+  deriving (Show, Eq, Ord)
+
+data Thunk = Thunk { tuples :: [Tuple], deps :: [Tuple] }
+  deriving (Show, Eq, Ord)
+
+instance Semigroup Binding where
+  (Binding b1 d1) <> (Binding b2 d2) = Binding (b1 <> b2) (d1 <> d2)
+
+empty = Binding mempty none
+
+instance Monoid Binding where
+  mempty = empty
+
+merge (Binding b1 d1) (Binding b2 d2) = do
+  b' <- B.merge b1 b2
+  pure (Binding b' (d1 <> d2))
+
+-- todo instance Collection Binding where
+single k v = Binding (B.ofList [(k,v)]) mempty
 
 data Closure a = Closure { context :: Binding, clVal :: a }
   deriving (Show, Eq, Ord, Functor)
@@ -42,7 +102,7 @@ data Rule = Rule { body :: CE, head :: [Tuple] }
 instance B.Unify Binding Term Term where
   unify b TermBlank _ = pure b
   unify b _ TermBlank = pure b
-  unify b (TermVar var) v  = B.unify b var v
+  unify (Binding b d) (TermVar var) v  = (\b' -> (Binding b' d)) <$> (B.unify b var v)
   unify b l@(TermPred _) r = guard (l == r) >> pure b
   unify b l@(TermNum _) r  = guard (l == r) >> pure b
   unify b l@(TermId _) r   = guard (l == r) >> pure b
@@ -56,23 +116,12 @@ instance B.Unify Binding [Term] [Term] where
     guard (length ts == length ts')
     foldM (uncurry . B.unify) b $ zip ts ts'
 
-join Unit x = x
-join x Unit = x
-join x y = Join x y
-
-leaf [] = Unit
-leaf t = Leaf t
-
-joins :: Foldable f => f Tuple -> E
-joins = foldr (\x acc -> join (leaf x) acc) Unit
-joins' :: Foldable f => f E -> E
-joins' = foldr (\x acc -> join x acc) Unit
-
 type Tuple = [Term]
 specialize :: CE -> Tuple -> [CE]
 specialize e@(Closure _ Unit) _ = [e]
 specialize (Closure _ Bind{}) _ = []
-specialize (Closure b (Leaf pat)) tuple = do
+specialize (Closure _ NegAtom{}) _ = []
+specialize (Closure b (Atom pat)) tuple = do
   b' <- maybeToList $ B.unify b pat tuple
   pure $ Closure b' Unit
 specialize (Closure c (Join a b)) tuple = left <> right <> both
@@ -91,8 +140,9 @@ specialize (Closure c (Join a b)) tuple = left <> right <> both
 
 eval :: CE -> [Tuple] -> [Binding]
 eval (Closure b Unit) _ = [b]
-eval (Closure b (Bind v t)) _ = [B.extend b v (subTerm b t)]
-eval c@(Closure _ (Leaf _)) tuples = concatMap (map context . specialize c) tuples
+eval (Closure b (Bind v t)) _ = [b <> single v (subTerm (bind b) t)]
+eval c@(Closure _ (Atom _)) tuples = concatMap (map context . specialize c) tuples
+eval (Closure (Binding bs as) (NegAtom at)) _ = [Binding bs (as <> [at])]
 eval (Closure c (Join a b)) tuples = do
   c' <- eval (Closure c a) tuples
   c'' <- eval (Closure c' b) tuples
@@ -117,34 +167,73 @@ subst ctx tuple = map sub1 tuple
     sub1 TermBlank = error ""
     sub1 x = x
 
-step :: Rule -> Tuple -> Set Tuple -> [Tuple]
+toThunk hd (Binding ctx ns) = [ Thunk (map (subst ctx) hd) (map (subst ctx) ns) ]
+
+step :: Rule -> Tuple -> Set Tuple -> [Thunk]
 step (Rule body hd) t ts = do
-  ctx <- eval1 body t (Set.toList ts)
-  map (subst ctx) hd
+  b <- eval1 body t (Set.toList ts)
+  toThunk hd b
 
-evalRule :: Rule -> Set Tuple -> [Tuple]
+evalRule :: Rule -> Set Tuple -> [Thunk]
 evalRule (Rule body hd) ts = do
-  ctx <- eval body (Set.toList ts)
-  map (subst ctx) hd
+  b <- eval body (Set.toList ts) -- todo use foldable
+  toThunk hd b
 
-iter :: Ord a => (a -> Set a -> [a]) -> ([a], Set a) -> Set a
-iter _ ([], old) = old
-iter f (t:ts, old) =
-  let new = filter (not . (`Set.member` old)) $ f t old
-   in iter f (ts <> new, old <> Set.singleton t)
+anyVal map [] = Nothing
+anyVal map (k:ks) =
+  case Map.lookup k map of
+    Just v -> Just (k,v)
+    Nothing -> anyVal map ks
 
-applyRules rules ts = mconcat $ map (\r -> evalRule r ts) rules
-iterRules rules = result
+partitionThunks :: [Thunk] -> ([Thunk], [Thunk])
+partitionThunks = partition (\case Thunk _ deps -> size deps > 0)
+
+takeThunk (Thunk hd []) = hd
+takeThunk _ = error ""
+evalThunk db (Thunk hd deps) =
+  if any (`member` db) deps then [] else hd
+evalThunks db ts = concatMap (evalThunk db) ts
+
+
+--iter :: Ord t => (t -> Set t -> ([t], b)) -> ([t], Set t, Set t) -> (Set t, Set t)
+iter f ([], thunks, all) =
+  if size thunks > 0
+     then
+     let new_ = evalThunks all thunks
+      in iter f (new_, none, all) else all -- todo
+iter f (t:ts, thunks, all) = st
   where
-    (start, rest) = partition emptyBody rules
+    hs = f t all
+    (blocked, new_) = partitionThunks hs
+    tuples = concatMap takeThunk new_
+    new = filter (not . (`member` all)) tuples
+    st = iter f (ts <> new, thunks <> blocked, all <> one t)
+
+--iterStrata ts fs = iterStrata' fs (ts, mempty, ofList ts) fs
+--iterStrata' f0 (_, delta, old) [] = if Set.size delta == 0 then old else iterStrata (Set.toList old) f0
+--iterStrata' f0 (ts, delta, old) (f:fs) =
+--  let (delta', old') = iter f (ts, delta, old)
+--   in iterStrata' f0 (Set.toList old', delta', old') fs
+
+-- todo
+applyRules :: [Rule] -> Set Tuple -> [Tuple]
+applyRules rules ts = concatMap takeThunk $ mconcat $ map (\r -> evalRule r ts) rules
+
+iterRules allRules = result
+  where
+    (start, rest) = partition emptyBody allRules
+    -- (negative, positive) = partition hasNegation rest
     emptyBody (Rule (Closure _ Unit) _) = True
     emptyBody _ = False
-    ts = applyRules start Set.empty
-    f t old = mconcat $ map (\r -> step r t old) rest
-    result = iter f (ts, Set.empty)
+    hasNegation (Rule (Closure _ e) _) = length (findNegations e) > 0
+    ts0 = applyRules start Set.empty
+    f rules t old = mconcat $ map (\r -> step r t old) rules
+    -- fs = (map f [positive, negative])
+    --s0 = (ts0, (mempty, neg0))
+    result = iter (f rest) (ts0, none, none)
+    --result = iterStrata ts0 fs
 
-ce = Closure B.empty
-var x = TermVar x
+ce = Closure mempty
 
 -- check :: E -> [Tuple] -> Maybe Tuple
 check _ [] = Nothing
@@ -167,5 +256,6 @@ instance PP Term where
   pp (TermId i) = pp i
   pp TermBlank = "_"
   pp (TermApp cons ts) = cons <> args (map pp ts)
+
 instance PP Id where
   pp (Id n vs) = n <> bwrap (unwords $ map pp vs)

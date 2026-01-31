@@ -57,7 +57,7 @@ executable tinman
     -- Import common warning flags.
     import:           warnings
 
-    default-extensions: PatternSynonyms
+    default-extensions: PatternSynonyms, FunctionalDependencies
 
     -- .hs or .lhs file containing the Main module.
     main-is:          Main.hs

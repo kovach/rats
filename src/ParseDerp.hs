@@ -18,11 +18,12 @@ term = app <|> v <|> p <|> b <|> n
 tuple :: Parser T.Tuple
 tuple = (wsSep term)
 
-expr = T.joins' <$> commaSep leaf
+expr = T.simplify <$> T.joins' <$> commaSep leaf
   where
-    leaf = bind <|> tup
-    tup = T.leaf <$> wsSep term
+    leaf = neg <|> bind <|> tup
+    tup = T.atom <$> wsSep term
     bind = T.Bind <$> variable <*> ((ws *> char '=' *> ws) *> term)
+    neg = T.NegAtom <$> (char '!' *> wsSep term)
 
 rule = do
   body <- expr

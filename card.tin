@@ -35,10 +35,14 @@
 
   !step s1 c1 stack
 ; !step s2 c2 c1
-; !step s3 c2 away
+; !step s3 c1 away
 ; !step s4 d away.
 
 ?step _ C L / !move C L.
+
+fs !a | (!b / !c).
+-- not working yet
+target ((?a | ?b) / ?c) | !d.
 
 -- (T ~ ?in-stack C stack)
 -- | (S ~ ?step N _ _)

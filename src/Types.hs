@@ -80,7 +80,7 @@ data E = Atom Pattern
   deriving (Show, Eq, Ord)
 
 -- todo: generate count summary for each Pragma
-data Statement = Pragma Pred | Rule E
+data Statement = Pragma Pred | Rule (Maybe Name) E
   deriving (Show, Eq, Ord)
 
 type Ms b c a = (State (MMap b c)) a

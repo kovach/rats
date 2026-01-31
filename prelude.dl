@@ -34,8 +34,14 @@ occurs(a), occurs(b) :- lt(a,b).
 occurs(a), occurs(b) :- le(a,b).
 occurs(a), occurs(b) :- occurs($Min(a,b)).
 occurs(a), occurs(b) :- occurs($Max(a,b)).
+
+// max(a,b) < x <--> a < x && b < x (all comparable)
 lt(x, $Min(a,b)) :- occurs($Min(a,b)), lt(x,a), lt(x,b).
 lt($Max(a,b), x) :- occurs($Max(a,b)), lt(a,x), lt(b,x).
+
+// x < max(a,b) <--> x < a || x < b (exists comparable)
+lt(x, $Max(a,b)) :- occurs($Max(a,b)), (lt(x,a) ; lt(x,b)).
+lt($Min(a,b), x) :- occurs($Min(a,b)), (lt(a,x) ; lt(b,x)).
 
 .decl TotalT(points: number, eq: number, lt: number, le: number, contains_: number, after: number, occurs: number) .output TotalT
 TotalT(points, eq, lt, le, cont, aft, occ) :-

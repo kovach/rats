@@ -227,6 +227,7 @@ foo = \case
   x | x > 0 -> 1
   x | x < 0 -> 2
 
+-- TODO: handle min, max in terms
 quantElimConstraints vs ps = out
   where
     chk c x = if c then x else error ""
@@ -363,12 +364,13 @@ schemaCompile countPreds (p, arity) =
 compileExp :: (Name, E) -> String
 compileExp (n, e) = ruleCompile e . generateConstraints . elab $ (n, e)
 
-compile :: [(Name, Statement)] -> String
+compile :: [Statement] -> String
 compile ps = result
   where
     (ops, es) = partitionEithers $ map isOp ps
-    isOp (_, Pragma p) = Left p
-    isOp (n, Rule e) = Right (n,e)
+    isOp (Pragma p) = Left p
+    isOp (Rule (Just n) e) = Right (n,e)
+    isOp (Rule Nothing _) = error ""
     notBasic (pr, _) = not (pr `elem` map Pred ["move", "at"])
     sch = filter notBasic $ nub $ concatMap (schema . snd) es
     result = unlines $
@@ -380,27 +382,34 @@ mkFile path p = do
   writeFile path $ prelude <> p
 
 demo name rules = do
-  case lookup name rules of
-    Just (Rule r) -> do
-      let f = (name, r)
-      --let f = (name, fromJust $ lookup name rules)
-      pprint $ snd f
-      putStrLn "~~~~~~~~~"
-      let f' = elab f
-      pprint f'
-      putStrLn "~~~~~~~~~"
-      let (body, h) = generateConstraints' f'
-      mapM_ pprint body
-      putStrLn "---------"
-      mapM_ pprint h
-      putStrLn "~~~~~~~~~"
-    _ -> error ""
+    case find (byName) rules of
+      Just (Rule _ r) -> do
+        let f = (name, r)
+        --let f = (name, fromJust $ lookup name rules)
+        pprint $ snd f
+        putStrLn "~~~~~~~~~"
+        let f' = elab f
+        pprint f'
+        putStrLn "~~~~~~~~~"
+        let (body, h) = generateConstraints' f'
+        mapM_ pprint body
+        putStrLn "---------"
+        mapM_ pprint h
+        putStrLn "~~~~~~~~~"
+      _ -> error ""
+  where
+    byName (Rule (Just n) _) | n == name = True
+    byName _ = False
 
 main1 = do
   pr0 <- readFile "card.tin"
   let pr = unlines . takeWhile (/= "exit") . filter (not . (== "--") . take 2) . lines $ pr0
-  let rules = zip [ "r" <> show i | i <- [1..] ] (assertParse program pr)
-  -- demo "r22" rules
+  let name _ r@(Rule (Just _) _) = r
+      name n (Rule Nothing r) = Rule (Just n) r
+      name n x = x
+  let rules = zipWith name [ "r" <> show i | i <- [1..] ] (assertParse program pr)
+  --let rules = (assertParse program pr)
+  demo "target" rules
   let result = compile rules
   mkFile "out.dl" $ result
 

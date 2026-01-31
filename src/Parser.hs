@@ -62,4 +62,4 @@ pragma = count
   where
     count = char '#' *> (pred)
 
-program = dotTerm ((T.Pragma <$> pragma) <|> (T.Rule <$> expr))
+program = dotTerm ((T.Pragma <$> pragma) <|> (T.Rule <$> optional (ws *> identifier <* ws) <*> expr))

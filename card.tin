@@ -10,11 +10,15 @@
   !place !P
 ).
 
-?place P |
-?card ~ ?type A | ?type A ~ ?action |
 (
-  !move A P
+  !moveA; !moveB
 ).
+
+?moveB, ?at I A, !foo I A.
+
+?moveA / !move x swamp.
+?moveB / !move x forest.
+
 
 #choose.
 !choose !C.
@@ -26,4 +30,4 @@
 #action.
 #treasure.
 #place.
-#move.
+#type.

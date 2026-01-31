@@ -289,10 +289,10 @@ patternCompile = \case
   p@(Pattern {}) -> error $ pp p
   Cmp op a b -> opString op <> pwrap (commas $ map tCompile [a,b])
   Eq a b -> termCompile a <> " = " <> termCompile b
-  IsId t -> "IsId" <> pwrap (termCompile t)
+  IsId t -> "isId" <> pwrap (termCompile t)
   Val a b -> "Val" <> args [termCompile a, termCompile b]
-opString OpLt = "Lt"
-opString OpEq = "Eq"
+opString OpLt = "lt"
+opString OpEq = "eq"
 termCompile :: Term -> String
 termCompile = \case
   TermVar v -> pp v
@@ -342,7 +342,7 @@ compile ps = result
     (ops, es) = partitionEithers $ map isOp ps
     isOp (_, Pragma p) = Left p
     isOp (n, Rule e) = Right (n,e)
-    notBasic (pr, _) = not (pr `elem` map Pred ["move"])
+    notBasic (pr, _) = not (pr `elem` map Pred ["move", "at"])
     sch = filter notBasic $ nub $ concatMap (schema . snd) es
     result = unlines $
       map (schemaCompile ops) sch
@@ -370,7 +370,7 @@ demo name rules = do
     _ -> error ""
 
 main1 = do
-  pr0 <- readFile "test.tin"
+  pr0 <- readFile "card.tin"
   let pr = unlines . takeWhile (/= "exit") . lines $ pr0
   let rules = zip [ "r" <> show i | i <- [1..] ] (assertParse program pr)
   --demo "r5" rules
@@ -382,10 +382,8 @@ main2 = do
   let rs = assertParse prog input
   print rs
   let (out) = D.iterRules rs
-  --mapM_ pprint $ out
-  --pprint $ neg
   putStrLn "result:"
   mapM_ pprint $ out
   putStrLn "."
 
-main = main2
+main = main1

@@ -6,8 +6,8 @@ cabal-version:      3.0
 -- Starting from the specification version 2.2, the cabal-version field must be
 -- the first thing in the cabal file.
 
--- Time Interval Notation MANipulator
-name:               tinman
+-- Reasoning About Time Symbolically
+name:               rats
 
 -- The package version.
 -- See the Haskell package versioning policy (PVP) for standards
@@ -53,7 +53,7 @@ common warnings
       -Wno-missing-signatures
       -Wunused-top-binds
 
-executable tinman
+executable rats
     -- Import common warning flags.
     import:           warnings
 

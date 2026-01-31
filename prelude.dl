@@ -1,3 +1,5 @@
+// .output choose(rfc4180=true,delimiter=",")
+
 .type RuleId = symbol
 .type Id = Id { rule: RuleId, binding: Binding }
 .type Entity = Id
@@ -10,79 +12,56 @@
 
 .decl Val(ref: Term, val: Term) .output Val .input Val(rfc4180=true,delimiter=",")
 
-.decl Lt(a: Time, b: Time)
-.decl Le(a: Time, b: Time)
-.decl Eq(a: Time, b: Time) eqrel
-.decl IsId(x: Term)
-Le(a,c) :- Le(a,b), Le(b,c).
-Le(a,b) :- Lt(a,b).
-Lt(a,c) :- Lt(a,b), Le(b,c).
-Lt(a,c) :- Le(a,b), Lt(b,c).
-Le(a,b) :- Eq(a,b).
-Eq($L(a),$L(a)) :- IsId(a).
-Eq($R(a),$R(a)) :- IsId(a).
-
-Lt(a, $Top()) :- Lt(a, _).
-Lt(a, $Top()) :- Lt(_, a).
-
-.decl Contains(x: Term, y: Term)
-.decl After(x: Term, y: Term)
-Contains(a, b) :- IsId(a), IsId(b), Lt($L(a), $L(b)), Lt($R(b), $R(a)).
-After(a, b) :- IsId(a), IsId(b), Lt($R(a), $L(b)).
-
-// .decl move(id: Term, it: Term, to: Term)
-// .decl MoveBefore(id: Term, it: Term, t: Time)
-// .decl NotLast(id: Term, it: Term, t: Time)
-// .decl Last(id: Term, it: Term, t: Time)
-// .decl LastPosition(it: Term, at: Term, t: Time)
-// .decl Nowhere(it: Term, t: Time) .output Nowhere
-// .decl at(it: Term, at: Term, t: Time) .output at
-// .decl move_at(move: Term, at: Term)
-//
-// MoveBefore(id, it, t) :- move(id, it, _), Le($R(id), t).
-// NotLast(id1, it, t) :-
-//   MoveBefore(id1, it, t),
-//   MoveBefore(id2, it, t),
-//   Lt($R(id1), $L(id2)).
-// Last(id, it, t) :- MoveBefore(id, it, t), !NotLast(id, it, t).
-// LastPosition(it, at, t) :- Last(id, it, t), move(id, _, at).
-// at(it, at, t) :- t = $Top(), LastPosition(it, at, t), 1 = count : { LastPosition(it, _, t) }.
-// Nowhere(it, t) :- t = $Top(), LastPosition(it, _, t), C = count : { LastPosition(it, _, t) }, C > 1.
-
-.decl move(id: Term, it: Term, to: Term)
-.decl MoveBefore(id: Term, it: Term, t: Time)
-.decl NotLast(id: Term, it: Term, t: Time)
-.decl Last(id: Term, it: Term, t: Time)
-.decl LastPosition(it: Term, at: Term, t: Time)
-.decl Nowhere(it: Term, t: Time) .output Nowhere
-.decl at(id: Term) .output at
-.decl at_pos(id: Term, it: Term, at: Term)
-.decl move_at(move: Term, at: Term)
-
-at(t), move_at(m, t), Eq($L(t), $R(m)) :- move(m, _, _), t=$TermId($Id("move_at", $Bind(m, $Nil()))).
-at_pos(t, it, at) :- at(t), move_at(m, t), move(m, it, at).
-MoveBefore(id, it, t) :- move(id, it, _), Le($R(id), t).
-NotLast(id1, it, t) :-
-  MoveBefore(id1, it, t),
-  MoveBefore(id2, it, t),
-  Lt($R(id1), $L(id2)).
-Last(id, it, t) :- MoveBefore(id, it, t), !NotLast(id, it, t).
-Lt($L(t), $R(at)) :- IsId(t), Last(move, it, t), move_at(move, at), at_pos(at, it, at).
-Nowhere(it, t) :- t = $Top(), LastPosition(it, _, t), C = count : { LastPosition(it, _, t) }, C > 1.
+.decl lt(a: Time, b: Time)
+.decl le(a: Time, b: Time)
+.decl eq(a: Time, b: Time) eqrel
+.decl isId(x: Term)
+le(a,c) :- le(a,b), le(b,c).
+le(a,b) :- lt(a,b).
+lt(a,c) :- lt(a,b), le(b,c).
+lt(a,c) :- le(a,b), lt(b,c).
+le(a,b) :- eq(a,b).
+eq($L(a), $L(a)) :- isId(a).
+eq($R(a), $R(a)) :- isId(a).
+lt($L(a), $R(a)) :- isId(a).
+lt($R(a), $Top()) :- isId(a).
 
 .decl TotalT(points: number, eq: number, lt: number, le: number, contains_: number, after: number) .output TotalT
 TotalT(points, eq, lt, le, cont, aft) :-
-  le = count : Le(_, _),
-  eq = count : Eq(_, _),
-  lt = count : Lt(_, _),
-  cont = count : Contains(_, _),
-  aft = count : After(_, _),
-  points = count : Le(_, $Top()).
+  le = count : le(_, _),
+  eq = count : eq(_, _),
+  lt = count : lt(_, _),
+  cont = count : cont(_, _),
+  aft = count : after(_, _),
+  points = count : le(_, $Top()).
 
-// .output choose(rfc4180=true,delimiter=",")
+.decl move(id: Term, it: Term, to: Term)
+.decl moveBefore(id: Term, it: Term, t: Time)
+.decl last(id: Term, it: Term, t: Time)
+.decl lastPosition(it: Term, at: Term, t: Time)
+//.decl at(id: Term)
+//.decl atPos(id: Term, it: Term, at: Term)
+.decl at(id: Term, it: Term, at: Term)
+.decl move_at(move: Term, id: Term)
+.decl nowhere(it: Term, t: Time) .output nowhere
 
-// todo
-//.decl AA(a: number)
-//.decl AAA(a: Term)
-//AA(autoinc()) :- Le(a,b).
-//AAA($TermNum(a)) :- AA(a).
+moveBefore(id, it, t) :- move(id, it, _), le($R(id), t).
+last(id, it, t) :- moveBefore(id, it, t).
+last(id1, it, t) <= last(id2, it, t) :- lt($R(id1), $L(id2)).
+
+lastPosition(it, at, t) :- last(id, it, t), move(id, _, at).
+nowhere(it, t) :-  lastPosition(it, _, t), C = count : { lastPosition(it, _, t) }, C > 1.
+
+isId(id), at(id, it, at), move_at(m, id), eq($L(id), $R(m)) :- move(m, it, at), id = $TermId($Id("at", $Bind(m, $Nil()))).
+// atPos(id, it, at) :- at(id), move_at(m, id), move(m, it, at).
+lt($L(t), $R(id)) :- isId(t), last(move, it, $L(t)), move_at(move, id).
+
+.decl overlap(a: Term, b: Term)
+.decl cont(a: Term, b: Term)
+.decl after(a: Term, b: Term)
+cont(a, b)    :- lt($L(a), $L(b)), lt($R(b), $R(a)).
+after(a, b)   :- lt($R(a), $L(b)).
+overlap(a, b) :- lt($L(a), $R(b)), lt($L(b), $R(a)).
+
+.decl out(move: Term, visible: Term) .output out
+out(m, a) :- isId(a), move_at(m, b), a != b, overlap(a,b).

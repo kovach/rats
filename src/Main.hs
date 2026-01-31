@@ -86,8 +86,8 @@ patternBoundVars = filter isNegVar . nub . execWriter . eTraverse' go
 schema :: E -> [(Pred, Int)]
 schema = execWriter . eTraverse' go
   where
-    go e@(Atom (PP pr ts)) = do tell [(pr, length ts)]
-    go e = pure ()
+    go (Atom (PP pr ts)) = do tell [(pr, length ts)]
+    go _ = pure ()
 
 elabCVars = eTermTraverse go
   where
@@ -186,6 +186,11 @@ check (And a b) = do
   I bl br <- check b
   tell [Max al bl `Lt` Min ar br]
   pure $ I (Max al bl) (Min ar br)
+check (At a b) = do
+  I al ar <- check a
+  I bl br <- check b
+  tell [al `Lt` bl, bl `Lt` ar]
+  pure $ I bl br
 check (Seq a b) = do
   I al ar <- check a
   I bl br <- check b
@@ -209,13 +214,18 @@ checkAll = snd . runWriter . check
 expandConstraint :: Pattern -> [Pattern]
 expandConstraint (Cmp op (Max a b) c) | opIneq op = expandConstraints [Cmp op a c, Cmp op b c]
 expandConstraint (Cmp op a (Min b c)) | opIneq op = expandConstraints [Cmp op a b, Cmp op a c]
+expandConstraint (Cmp OpEq a a') | a == a' = []
 expandConstraint (Cmp _ _ Top) = []
-expandConstraint p@(Cmp _ (Min _ _) _) = error $ pp p  -- no disjunctive comparisons
-expandConstraint p@(Cmp _ _ (Max _ _)) = error $ pp p  -- no disjunctive comparisons
+-- expandConstraint p@(Cmp _ (Min _ _) _) = error $ pp p  -- no disjunctive comparisons
+-- expandConstraint p@(Cmp _ _ (Max _ _)) = error $ pp p  -- no disjunctive comparisons
 expandConstraint x = [x]
 
 expandConstraints :: [Pattern] -> [Pattern]
 expandConstraints = concatMap expandConstraint
+
+foo = \case
+  x | x > 0 -> 1
+  x | x < 0 -> 2
 
 quantElimConstraints vs ps = out
   where
@@ -234,8 +244,8 @@ quantElimConstraints vs ps = out
     isGt _ _ = False
     isLt v (Cmp OpLt v' _) = v == v'
     isLt _ _ = False
-    isEq v (Cmp OpEq a b) | v == a = Just b
-    isEq v (Cmp OpEq a b) | v == b = Just a
+    isEq v (Cmp OpEq a b) | v == a && v /= b = Just b
+    isEq v (Cmp OpEq a b) | v == b && v /= a = Just a
     isEq _ _ = Nothing
     isCmp (Cmp {}) = True
     isCmp _ = False
@@ -280,7 +290,18 @@ splitConstraints pvs x =
   let (pos, neg) = partition (isPos pvs) x
    in (Set.fromList neg, Set.fromList pos)
 
-generateConstraints e = splitConstraints (posVars e) . quantElimConstraints (vars e) . expandConstraints . checkAll $ e
+generateConstraints e = splitConstraints (posVars e)
+  . expandConstraints
+  . quantElimConstraints (vars e)
+  . expandConstraints
+  . checkAll $ e
+
+ppt f cs = trace ("!!: " <> unlines (map pp cs)) $ f cs
+generateConstraints' e = splitConstraints (posVars e)
+  . (ppt expandConstraints)
+  . (ppt $ quantElimConstraints (vars e))
+  . expandConstraints
+  . checkAll $ e
 
 patternCompileDot = (<> ".") . patternCompile
 patternCompile :: Pattern -> String
@@ -315,6 +336,12 @@ tCompile = \case
   Top -> cons "Top" []
 cons s t = "$" <> s <> args t
 
+chunkAtoms [] = ""
+chunkAtoms xs =
+  let (h,t) = splitAt 4 xs in
+      case t of
+        [] -> commas h
+        _ -> commas h <> ",\n" <> chunkAtoms t
 ruleCompile e (body, h) =
   let comment = "// " <> pp e <> "\n" in
   comment <>
@@ -323,9 +350,9 @@ ruleCompile e (body, h) =
     if Set.size body == 0 then
      unwords (map patternCompileDot $ Set.toList h)
     else
-      commas (map patternCompile $ Set.toList h)
+      chunkAtoms (map patternCompile $ Set.toList h)
       <> "\n  :-\n"
-      <> commas (map patternCompile $ Set.toList body)
+      <> chunkAtoms (map patternCompile $ Set.toList body)
       <> "\n."
 
 schemaCompile :: [Pred] -> (Pred, Int) -> String
@@ -362,7 +389,7 @@ demo name rules = do
       let f' = elab f
       pprint f'
       putStrLn "~~~~~~~~~"
-      let (body, h) = generateConstraints f'
+      let (body, h) = generateConstraints' f'
       mapM_ pprint body
       putStrLn "---------"
       mapM_ pprint h
@@ -371,9 +398,9 @@ demo name rules = do
 
 main1 = do
   pr0 <- readFile "card.tin"
-  let pr = unlines . takeWhile (/= "exit") . lines $ pr0
+  let pr = unlines . takeWhile (/= "exit") . filter (not . (== "--") . take 2) . lines $ pr0
   let rules = zip [ "r" <> show i | i <- [1..] ] (assertParse program pr)
-  --demo "r5" rules
+  -- demo "r22" rules
   let result = compile rules
   mkFile "out.dl" $ result
 
@@ -381,7 +408,7 @@ main2 = do
   input <- readFile "test.derp"
   let rs = assertParse prog input
   print rs
-  let (out) = D.iterRules rs
+  let out = D.iterRules rs
   putStrLn "result:"
   mapM_ pprint $ out
   putStrLn "."

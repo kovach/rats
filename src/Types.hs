@@ -76,6 +76,7 @@ data E = Atom Pattern
        | Par E E
        | Over E E
        | Same E E
+       | At E E
   deriving (Show, Eq, Ord)
 
 -- todo: generate count summary for each Pragma
@@ -94,6 +95,10 @@ fresh t = do
   modify (M.insert t 1)
   pure $ t <> show i -- (if i == 0 then "" else show i)
 
+fixId = map fix
+    where
+      fix '-' = '_'
+      fix x = x
 instance IsString Pred where
   fromString = Pred
 
@@ -104,9 +109,10 @@ instance PP T where
   pp (Min a b) = "min(" <> pp a <> ", " <> pp b <> ")"
   pp (Max a b) = "max(" <> pp a <> ", " <> pp b <> ")"
   pp Top = "⊤"
-instance PP Pred where pp (Pred s) = s
+instance PP Pred where
+  pp (Pred s) = fixId s
 instance PP Var where
-  pp = \case
+  pp = fixId . \case
     NegVar v -> v
     PosVar v -> v
     ExVar v -> "-" <> v
@@ -142,6 +148,7 @@ instance PP E where
   pp (Par a b) = pwrap $ pp a <> " | " <> pp b
   pp (Over a b) = pwrap $ pp a <> " / " <> pp b
   pp (Same a b) = pwrap $ pp a <> " ~ " <> pp b
+  pp (At a b) = pwrap $ pp a <> " @ " <> pp b
 
 eTraverse :: Applicative m => (E -> m E) -> E -> m E
 eTraverse f = go
@@ -154,6 +161,7 @@ eTraverse f = go
     go (Par a b) = Par <$> (go a) <*> (go b)
     go (Over a b) = Over <$> (go a) <*> (go b)
     go (Same a b) = Same <$> (go a) <*> (go b)
+    go (At a b) = At <$> (go a) <*> (go b)
 
 eTraverse' :: Applicative m => (E -> m ()) -> E -> m ()
 eTraverse' f e0 = eTraverse (\e -> f e *> pure e) e0 *> pure ()

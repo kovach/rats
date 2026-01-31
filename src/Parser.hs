@@ -41,10 +41,11 @@ expr1 = at <|> p <|> af <|> vr
     af = T.After <$> (char '>' *> ws *> expr1)
     vr = T.EVar <$> term
 expr2 :: Parser T.E
-expr2 = and_ <|> seq_ <|> expr1
+expr2 = and_ <|> seq_ <|> at <|> expr1
   where
     and_ = uncurry T.And <$> sep2 (char ',') expr1 expr2
     seq_ = uncurry T.Seq <$> sep2 (char ';') expr1 expr2
+    at = uncurry T.At <$> sep2 (char '@') expr1 expr2
 expr3 :: Parser T.E
 expr3 = over <|> same <|> expr2
   where

@@ -1,29 +1,3 @@
-!game.
-
-?game /
-  !setup; (!turn ~ !initial).
-
-?setup / (
-  !type !V ~ !name village ~ !action |
-  !type !G ~ !name gold ~ !treasure |
-  !card ~ !type !V |
-  !place !P
-).
-
-(
-  !moveA; !moveB
-).
-
-?moveB, ?at I A, !foo I A.
-
-?moveA / !move x swamp.
-?moveB / !move x forest.
-
-
-#choose.
-!choose !C.
-?choose ?C, !f C.
-
 #game.
 #initial_turn.
 #card.
@@ -31,3 +5,55 @@
 #treasure.
 #place.
 #type.
+#name.
+#initial.
+#setup.
+
+
+!game.
+
+?game /
+  !setup; (!turn ~ !initial).
+
+?setup / (
+  !type !V ~ !name village ~ !action
+  | !type !G ~ !name gold ~ !treasure
+  | !card ~ !type !V
+).
+
+!moveA; !moveB.
+
+?moveA / !move x swamp.
+?moveB / !move x forest.
+-- (?moveB, ?at I A) ~ !foo I A.
+
+
+?stack S | (?at X S  ~ !in-stack X S).
+(?at A B, ?in-stack B S) ~ !in-stack A S.
+
+!stack stack.
+
+  !step s1 c1 stack
+; !step s2 c2 c1
+; !step s3 c2 away
+; !step s4 d away.
+
+?step _ C L / !move C L.
+
+-- (T ~ ?in-stack C stack)
+-- | (S ~ ?step N _ _)
+-- | (T @ S)
+-- | V ~ !visible C N
+-- | (S / V)
+-- .
+
+?in-stack C stack @ ?step N _ _ / !visible C N.
+
+#visible.
+
+exit
+
+#choose.
+!choose !C.
+?choose ?C, !f C.
+

@@ -201,6 +201,11 @@ check (Over a b) = do
   I bl br <- check b
   tell [al `Lt` bl, br `Lt` ar]
   pure $ I al ar
+check (Under a b) = do
+  I al ar <- check a
+  I bl br <- check b
+  tell [bl `Lt` al, ar `Lt` br]
+  pure $ I al ar
 check (Same a b) = do
   I al ar <- check a
   I bl br <- check b

@@ -40,7 +40,7 @@
 
 ?step _ C L / !move C L.
 
-fs !a | (!b / !c).
+!a | (!b / !c).
 -- not working yet
 target ((?a | ?b) / ?c) | !d.
 

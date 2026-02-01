@@ -47,9 +47,10 @@ expr2 = and_ <|> seq_ <|> at <|> expr1
     seq_ = uncurry T.Seq <$> sep2 (char ';') expr1 expr2
     at = uncurry T.At <$> sep2 (char '@') expr1 expr2
 expr3 :: Parser T.E
-expr3 = over <|> same <|> expr2
+expr3 = over <|> under <|> same <|> expr2
   where
     over = uncurry T.Over <$> sep2 (char '/') expr2 expr3
+    under = uncurry T.Under <$> sep2 (char '\\') expr2 expr3
     same = (uncurry T.Same <$> sep2 (char '~') expr2 expr3)
 expr4 :: Parser T.E
 expr4 = par <|> expr3

@@ -75,6 +75,7 @@ data E = Atom Pattern
        | Seq E E
        | Par E E
        | Over E E
+       | Under E E
        | Same E E
        | At E E
   deriving (Show, Eq, Ord)
@@ -147,6 +148,7 @@ instance PP E where
   pp (Seq a b) = pwrap $ pp a <> "; " <> pp b
   pp (Par a b) = pwrap $ pp a <> " | " <> pp b
   pp (Over a b) = pwrap $ pp a <> " / " <> pp b
+  pp (Under a b) = pwrap $ pp a <> " \\ " <> pp b
   pp (Same a b) = pwrap $ pp a <> " ~ " <> pp b
   pp (At a b) = pwrap $ pp a <> " @ " <> pp b
 
@@ -160,6 +162,7 @@ eTraverse f = go
     go (Seq a b) = Seq <$> (go a) <*> (go b)
     go (Par a b) = Par <$> (go a) <*> (go b)
     go (Over a b) = Over <$> (go a) <*> (go b)
+    go (Under a b) = Under <$> (go a) <*> (go b)
     go (Same a b) = Same <$> (go a) <*> (go b)
     go (At a b) = At <$> (go a) <*> (go b)
 

@@ -36,6 +36,8 @@ data E
   | Unit
   deriving (Show, Eq, Ord)
 
+pattern SpecialAtom p ts = Atom (TermPred ('#' : p) : ts)
+
 join Unit x = x
 join x Unit = x
 join x y = Join x y
@@ -138,9 +140,16 @@ specialize (Closure c (Join a b)) tuple = left <> right <> both
       Closure c'' b' <- spec c' b
       pure $ Closure c'' (join a' b')
 
+evalSpecial b "range" [t, TermNum lo, TermNum hi] = do
+  i <- [lo..hi]
+  case B.unify b t (TermNum i) of
+    Just b' -> pure b'
+    _ -> []
+evalSpecial _ _ _ = error "unimplemented"
 eval :: CE -> [Tuple] -> [Binding]
 eval (Closure b Unit) _ = [b]
 eval (Closure b (Bind v t)) _ = [b <> single v (subTerm (bind b) t)]
+eval (Closure b (SpecialAtom p ts)) _ = evalSpecial b p ts
 eval c@(Closure _ (Atom _)) tuples = concatMap (map context . specialize c) tuples
 eval (Closure (Binding bs as) (NegAtom at)) _ = [Binding bs (as <> [at])]
 eval (Closure c (Join a b)) tuples = do
@@ -160,6 +169,7 @@ subTerm ctx = \case
     TermBlank -> error ""
     x -> x
 
+subst :: B.Binding Name Term -> Tuple -> Tuple
 subst ctx tuple = map sub1 tuple
   where
     sub1 (TermVar n) = fromJust $ B.lookup n ctx
@@ -167,7 +177,11 @@ subst ctx tuple = map sub1 tuple
     sub1 TermBlank = error ""
     sub1 x = x
 
-toThunk hd (Binding ctx ns) = [ Thunk (map (subst ctx) hd) (map (subst ctx) ns) ]
+substs :: B.Binding Name Term -> [Tuple] -> [Tuple]
+substs ctx = map (subst ctx)
+
+toThunk :: [Tuple] -> Binding -> [Thunk]
+toThunk hd (Binding ctx ns) = [ Thunk (substs ctx hd) (substs ctx ns) ]
 
 step :: Rule -> Tuple -> Set Tuple -> [Thunk]
 step (Rule body hd) t ts = do

@@ -75,9 +75,10 @@ data E = Atom Pattern
        | Seq E E
        | Par E E
        | Over E E
-       | Under E E
        | Same E E
        | At E E
+       | Under E E
+       -- | Count Name E
   deriving (Show, Eq, Ord)
 
 -- todo: generate count summary for each Pragma

@@ -427,4 +427,4 @@ main2 = do
   mapM_ pprint $ out
   putStrLn "."
 
-main = main1
+main = main2

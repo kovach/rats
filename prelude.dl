@@ -84,3 +84,7 @@ overlap(a, b) :- lt($L(a), $R(b)), lt($L(b), $R(a)).
 .decl out(move: Term, visible: Term) .output out
 out(a, b) :- visible(_, a, b).
 
+//lt($Top(), $Top()) :- x = count : { at(x, y, z) }.
+//.decl asdf(x: number)
+//asdf(X+1) :- asdf(X)
+//asdf(X) <= asdf(Y) :- X < Y.

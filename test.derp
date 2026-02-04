@@ -3,3 +3,6 @@
 num A, !no A -- ok A.
 ok A -- done A.
 num A, !done A -- finally A.
+
+-- setup.
+setup, #range I 1 5, #range J 1 5 -- wow I J.

@@ -150,8 +150,8 @@ single = (singleton <$>)
 
 -- Language Parsers
 identifier = (singleton <$> idChar) <> many idChar
---predicate = (singleton <$> (lower <|> char '@')) <> many idChar
-predicate = (singleton <$> lower) <> many idChar
+predicate = (singleton <$> (lower <|> char '#')) <> many idChar
+--predicate = (singleton <$> lower) <> many idChar
 variable =
   (single upper <> many idChar) <|>
   (single (char '_') <> many1 idChar)

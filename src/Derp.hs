@@ -31,6 +31,8 @@ data Term
   | TermString String
   deriving (Show, Eq, Ord)
 
+type Tuple = [Term]
+
 data E
   = Atom Tuple
   | NegAtom Tuple
@@ -39,14 +41,88 @@ data E
   | Unit
   deriving (Show, Eq, Ord)
 
+pattern SpecialAtom p ts = Atom (TermPred ('#' : p) : ts)
+
+newtype Tuples = Tuples (MMap.MMap Pred (Set Tuple))
+  deriving (Semigroup, Monoid)
+
+data Binding = Binding { bind :: B.Binding Name Term, bdeps :: [Tuple] }
+  deriving (Show, Eq, Ord)
+
+data Thunk = Thunk { tuples :: [Tuple], deps :: [Tuple] }
+  deriving (Show, Eq, Ord)
+
+data Closure a = Closure { context :: Binding, clVal :: a }
+  deriving (Show, Eq, Ord, Functor)
+
+type CE = Closure E
+
+data Rule = Rule { body :: CE, head :: [Tuple] }
+  deriving (Show, Eq, Ord)
+
+instance Semigroup Binding where
+  (Binding b1 d1) <> (Binding b2 d2) = Binding (b1 <> b2) (d1 <> d2)
+
+instance Monoid Binding where
+  mempty = Binding mempty none
+
+instance PP Term where
+  pp (TermVar v) = v
+  pp (TermPred p) = p
+  pp (TermNum i) = show i
+  pp (TermId i) = pp i
+  pp TermBlank = "_"
+  pp (TermApp cons ts) = cons <> args (map pp ts)
+  pp (TermString s) = show s
+
+instance PP Id where
+  pp (Id n vs) = n <> bwrap (unwords $ map pp vs)
+
+instance Collection' Tuples where
+  size (Tuples m) = sum $ map (\(_, vs) -> size vs) $ MMap.toList m
+
+instance Collection Tuple Tuples where
+  one (TermPred p : vs) = Tuples (MMap.singleton p (one vs))
+  one _ = error ""
+  member (TermPred p : vs) (Tuples m) = vs `member` MMap.lookup p m
+  member _ _ = error ""
+
+instance PP Tuples where
+  pp (Tuples m) = out
+    where
+      fix (k, vs) = map (TermPred k:) $ Set.toList vs
+      tuples = mconcat $ map fix $ MMap.toList m
+      out = unlines . map pp $ tuples
+
+instance B.Unify Binding Term Term where
+  unify b TermBlank _ = pure b
+  unify b _ TermBlank = pure b
+  unify (Binding b d) (TermVar var) v  = (\b' -> (Binding b' d)) <$> (B.unify b var v)
+  unify b l@(TermPred _) r = guard (l == r) >> pure b
+  unify b l@(TermNum _) r  = guard (l == r) >> pure b
+  unify b l@(TermId _) r   = guard (l == r) >> pure b
+  unify b l@(TermString _) r   = guard (l == r) >> pure b
+  unify b (TermApp cons ts) (TermApp cons' ts') = do
+    guard $ cons == cons'
+    B.unify b ts ts'
+  unify _ (TermApp {}) _ = fail "app"
+
+instance B.Unify Binding [Term] [Term] where
+  unify b x y = do
+      go b x y
+    where
+      go c (t:ts) (v:vs) = do
+        c' <- (B.unify c t v)
+        go c' ts vs
+      go c [] [] = pure c
+      go _ _ _ = Nothing
+
 immediate = \case
   Unit -> True
   Bind {} -> True
   Join a b -> immediate a && immediate b
   Atom {} -> False
   NegAtom {} -> False
-
-pattern SpecialAtom p ts = Atom (TermPred ('#' : p) : ts)
 
 join Unit x = x
 join x Unit = x
@@ -82,21 +158,6 @@ findNegations = execWriter . eTraverse' go
     go (NegAtom t) = tell [t]
     go _ = pure ()
 
-type Neg = Map Tuple [Tuple]
-data Binding = Binding { bind :: B.Binding Name Term, bdeps :: [Tuple] }
-  deriving (Show, Eq, Ord)
-
-data Thunk = Thunk { tuples :: [Tuple], deps :: [Tuple] }
-  deriving (Show, Eq, Ord)
-
-instance Semigroup Binding where
-  (Binding b1 d1) <> (Binding b2 d2) = Binding (b1 <> b2) (d1 <> d2)
-
-empty = Binding mempty none
-
-instance Monoid Binding where
-  mempty = empty
-
 merge (Binding b1 d1) (Binding b2 d2) = do
   b' <- B.merge b1 b2
   pure (Binding b' (d1 <> d2))
@@ -104,37 +165,6 @@ merge (Binding b1 d1) (Binding b2 d2) = do
 -- todo instance Collection Binding where
 single k v = Binding (B.ofList [(k,v)]) mempty
 
-data Closure a = Closure { context :: Binding, clVal :: a }
-  deriving (Show, Eq, Ord, Functor)
-type CE = Closure E
-
-data Rule = Rule { body :: CE, head :: [Tuple] }
-  deriving (Show, Eq, Ord)
-
-instance B.Unify Binding Term Term where
-  unify b TermBlank _ = pure b
-  unify b _ TermBlank = pure b
-  unify (Binding b d) (TermVar var) v  = (\b' -> (Binding b' d)) <$> (B.unify b var v)
-  unify b l@(TermPred _) r = guard (l == r) >> pure b
-  unify b l@(TermNum _) r  = guard (l == r) >> pure b
-  unify b l@(TermId _) r   = guard (l == r) >> pure b
-  unify b l@(TermString _) r   = guard (l == r) >> pure b
-  unify b (TermApp cons ts) (TermApp cons' ts') = do
-    guard $ cons == cons'
-    B.unify b ts ts'
-  unify _ (TermApp {}) _ = fail "app"
-
-instance B.Unify Binding [Term] [Term] where
-  unify b x y = do
-      go b x y
-    where
-      go c (t:ts) (v:vs) = do
-        c' <- (B.unify c t v)
-        go c' ts vs
-      go c [] [] = pure c
-      go _ _ _ = Nothing
-
-type Tuple = [Term]
 specialize :: CE -> Tuple -> [CE]
 specialize e@(Closure _ Unit) _ = [e]
 specialize (Closure _ Bind{}) _ = []
@@ -163,23 +193,6 @@ evalBuiltin b "range" [_, t, TermNum lo, TermNum hi] = do
     _ -> []
 -- evalBuiltin b "eq" [x, y] = maybeToList $ B.unify b x y
 evalBuiltin _ op as = error $ "unimplemented: " <> op <> args (map pp as)
-
-newtype Tuples = Tuples (MMap.MMap Pred (Set Tuple))
-  deriving (Semigroup, Monoid)
-
-instance Collection' Tuples where
-  size (Tuples m) = sum $ map (\(_, vs) -> size vs) $ MMap.toList m
-instance Collection Tuple Tuples where
-  one (TermPred p : vs) = Tuples (MMap.singleton p (one vs))
-  one _ = error ""
-  member (TermPred p : vs) (Tuples m) = vs `member` MMap.lookup p m
-  member _ _ = error ""
-instance PP Tuples where
-  pp (Tuples m) = out
-    where
-      fix (k, vs) = map (TermPred k:) $ Set.toList vs
-      tuples = mconcat $ map fix $ MMap.toList m
-      out = unlines . map pp $ tuples
 
 eval :: CE -> Tuples -> [Binding]
 eval (Closure b Unit) _ = [b]
@@ -300,14 +313,3 @@ ce = Closure mempty
 --      v <- eval cl ts
 --      pure v
 
-instance PP Term where
-  pp (TermVar v) = v
-  pp (TermPred p) = p
-  pp (TermNum i) = show i
-  pp (TermId i) = pp i
-  pp TermBlank = "_"
-  pp (TermApp cons ts) = cons <> args (map pp ts)
-  pp (TermString s) = show s
-
-instance PP Id where
-  pp (Id n vs) = n <> bwrap (unwords $ map pp vs)

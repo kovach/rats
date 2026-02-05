@@ -1,3 +1,5 @@
+{-# LANGUAGE AllowAmbiguousTypes #-}
+
 module Basic where
 
 import Data.Char
@@ -43,22 +45,39 @@ args = pwrap . intercalate ", "
 assert a b | a == b = putStrLn "ok"
 assert a b = error $ "not-equal:\n" <> pp a <> "\n\n" <> pp b
 
-class Monoid b => Collection a b | b -> a where
+class Monoid b => Collection' b where
   none :: b
+  none = mempty
+  size :: b -> Int
+class (Collection' b, Monoid b) => Collection a b where
   one :: a -> b
   ofList :: [a] -> b
   ofList = mconcat . map one
-  none = mempty
-  size :: b -> Int
   member :: a -> b -> Bool
+  take :: b -> Maybe (a, b)
 instance Ord a => Collection a (Set a) where
   one = Set.singleton
-  size = length
   member = elem
+  take = Set.minView
+instance Ord a => Collection' (Set a) where
+  size = length
+instance Eq a => Collection' [a] where
+  size = length
 instance Eq a => Collection a [a] where
   one x = [x]
-  size = length
   member = elem
-instance Ord k => Collection (k,v) (Map k v) where
-  one = uncurry Map.singleton
+  take = \case
+    a:as -> Just (a,as)
+    [] -> Nothing
+instance Ord k => Collection' (Map k c) where
   size = length
+instance (Ord k, Collection v c) => Collection (k, v) (Map k c) where
+  one (k, v) = Map.singleton k (one v)
+  take m = do
+    ((k,c), m') <- Map.minViewWithKey m
+    (v,c') <- Basic.take c
+    pure ((k,v), m' <> Map.singleton k c')
+  member (k, v) m =
+    case Map.lookup k m of
+      Just c -> v `member` c
+      _ -> False

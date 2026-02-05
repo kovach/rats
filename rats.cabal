@@ -57,7 +57,7 @@ executable rats
     -- Import common warning flags.
     import:           warnings
 
-    default-extensions: PatternSynonyms, FunctionalDependencies
+    default-extensions: PatternSynonyms, FunctionalDependencies, GeneralizedNewtypeDeriving
 
     -- .hs or .lhs file containing the Main module.
     main-is:          Main.hs
@@ -91,3 +91,9 @@ executable rats
 
     -- Base language which the package is written in.
     default-language: GHC2024
+
+    profiling: True
+
+    ghc-options:
+        -O2
+        -fprof-auto

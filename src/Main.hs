@@ -5,12 +5,13 @@
 {-# LANGUAGE ConstraintKinds #-}
 module Main (main) where
 
-import Prelude hiding (pred, exp)
+import Prelude hiding (pred, exp, take)
 import Control.Monad.Writer
 import Control.Monad.State
 import Control.Monad
 import Data.Monoid (Sum(..))
-import Data.List
+import Data.List hiding (take)
+import qualified Data.List
 import Data.Maybe
 import Data.Functor.Identity
 import Data.Either
@@ -356,24 +357,28 @@ demo name rules = do
     byName _ = False
 
 main1 = do
-  pr0 <- readFile "ttt.turn"
-  let pr = unlines . takeWhile (/= "exit") . filter (not . (== "--") . take 2) . lines $ pr0
+  pr0 <- readFile "card.tin"
+  --pr0 <- readFile "ttt.turn"
+  let pr = unlines . takeWhile (/= "exit") . filter (not . (== "--") . Data.List.take 2) . lines $ pr0
   let name _ r@(Rule (Just _) _) = r
       name n (Rule Nothing r) = Rule (Just n) r
       name _ x = x
   let rules = zipWith name [ "r" <> show i | i <- [1..] ] (assertParse program pr)
   -- demo "r2" rules
-  let result = compile rules
-  putStrLn $ "generated derp:\n" <> result
-  mkFile "out.derp" $ result
+  let ruleText = compile rules
+  prelude <- GD.readPrelude
+  let result = prelude <> ruleText
+  putStrLn $ "generated derp:\n" <> ruleText
+  writeFile "out.derp" result
   pure result
 
 main2' input = do
   let rs = assertParse prog $ lexComments ";" input
-  --print rs
+  -- print rs
   let out = D.iterRules rs
   putStrLn "\nresult:"
-  mapM_ (putStrLn . spaces . map pp) $ out
+  pprint $ out
+  print $ size out
   putStrLn "."
 
 main2 = do

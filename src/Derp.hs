@@ -26,15 +26,23 @@ data Term
   | TermId Id
   | TermBlank
   | TermApp Name [Term]
+  | TermString String
   deriving (Show, Eq, Ord)
 
 data E
   = Atom Tuple
   | NegAtom Tuple
-  | Bind Name Term
+  | Bind Term Term
   | Join E E
   | Unit
   deriving (Show, Eq, Ord)
+
+immediate = \case
+  Unit -> True
+  Bind {} -> True
+  Join a b -> immediate a && immediate b
+  Atom {} -> False
+  NegAtom {} -> False
 
 pattern SpecialAtom p ts = Atom (TermPred ('#' : p) : ts)
 
@@ -108,6 +116,7 @@ instance B.Unify Binding Term Term where
   unify b l@(TermPred _) r = guard (l == r) >> pure b
   unify b l@(TermNum _) r  = guard (l == r) >> pure b
   unify b l@(TermId _) r   = guard (l == r) >> pure b
+  unify b l@(TermString _) r   = guard (l == r) >> pure b
   unify b (TermApp cons ts) (TermApp cons' ts') = do
     guard $ cons == cons'
     B.unify b ts ts'
@@ -140,16 +149,17 @@ specialize (Closure c (Join a b)) tuple = left <> right <> both
       Closure c'' b' <- spec c' b
       pure $ Closure c'' (join a' b')
 
-evalSpecial b "range" [t, TermNum lo, TermNum hi] = do
+evalBuiltin b "range" [_, t, TermNum lo, TermNum hi] = do
   i <- [lo..hi]
   case B.unify b t (TermNum i) of
     Just b' -> pure b'
     _ -> []
-evalSpecial _ _ _ = error "unimplemented"
+-- evalBuiltin b "eq" [x, y] = maybeToList $ B.unify b x y
+evalBuiltin _ op as = error $ "unimplemented: " <> op <> args (map pp as)
 eval :: CE -> [Tuple] -> [Binding]
 eval (Closure b Unit) _ = [b]
-eval (Closure b (Bind v t)) _ = [b <> single v (subTerm (bind b) t)]
-eval (Closure b (SpecialAtom p ts)) _ = evalSpecial b p ts
+eval (Closure b (Bind x y)) _ = maybeToList $ B.unify b x y
+eval (Closure b (SpecialAtom p ts)) _ = evalBuiltin b p ts
 eval c@(Closure _ (Atom _)) tuples = concatMap (map context . specialize c) tuples
 eval (Closure (Binding bs as) (NegAtom at)) _ = [Binding bs (as <> [at])]
 eval (Closure c (Join a b)) tuples = do
@@ -193,11 +203,11 @@ evalRule (Rule body hd) ts = do
   b <- eval body (Set.toList ts) -- todo use foldable
   toThunk hd b
 
-anyVal map [] = Nothing
-anyVal map (k:ks) =
-  case Map.lookup k map of
-    Just v -> Just (k,v)
-    Nothing -> anyVal map ks
+-- anyVal _ [] = Nothing
+-- anyVal map (k:ks) =
+--   case Map.lookup k map of
+--     Just v -> Just (k,v)
+--     Nothing -> anyVal map ks
 
 partitionThunks :: [Thunk] -> ([Thunk], [Thunk])
 partitionThunks = partition (\case Thunk _ deps -> size deps > 0)
@@ -237,7 +247,7 @@ iterRules allRules = result
   where
     (start, rest) = partition emptyBody allRules
     -- (negative, positive) = partition hasNegation rest
-    emptyBody (Rule (Closure _ Unit) _) = True
+    emptyBody (Rule (Closure _ e) _) = immediate e
     emptyBody _ = False
     hasNegation (Rule (Closure _ e) _) = length (findNegations e) > 0
     ts0 = applyRules start Set.empty
@@ -270,6 +280,7 @@ instance PP Term where
   pp (TermId i) = pp i
   pp TermBlank = "_"
   pp (TermApp cons ts) = cons <> args (map pp ts)
+  pp (TermString s) = show s
 
 instance PP Id where
   pp (Id n vs) = n <> bwrap (unwords $ map pp vs)

@@ -37,6 +37,7 @@ capitalize = map toUpper
 bwrap x = "[" <> x <> "]"
 spwrap x = " " <> x <> " "
 commas = intercalate ", "
+spaces = intercalate " "
 args = pwrap . intercalate ", "
 
 assert a b | a == b = putStrLn "ok"

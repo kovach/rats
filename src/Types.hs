@@ -27,10 +27,11 @@ data Id = Id Name [Var]
   deriving (Show, Eq, Ord)
 data Pred = Pred String
   deriving (Show, Eq, Ord)
-data T = L Term | R Term | Min T T | Max T T | Top
+data T = L Term | R Term | Min T T | Max T T | Top | Bot
   deriving (Show, Eq, Ord)
 data I = I T T deriving (Show, Eq, Ord)
 data Term = TermPred Pred
+          | TermNum Int
           | TermId Id
           | TermVar Var
           | TermFreshVar Var
@@ -111,6 +112,7 @@ instance PP T where
   pp (Min a b) = "min(" <> pp a <> ", " <> pp b <> ")"
   pp (Max a b) = "max(" <> pp a <> ", " <> pp b <> ")"
   pp Top = "⊤"
+  pp Bot = "⊥"
 instance PP Pred where
   pp (Pred s) = fixId s
 instance PP Var where
@@ -121,6 +123,7 @@ instance PP Var where
 instance PP Term where
   pp (TermVar v) = pp v
   pp (TermPred p) = pp p
+  pp (TermNum i) = show i
   pp (TermId i) = pp i
   pp (TermFreshVar v) = "!" <> pp v
   pp (TermChoiceVar _ v) = "?" <> pp v
@@ -190,5 +193,9 @@ tTraverse f =  go
     go t@(L _) = f t
     go t@(R _) = f t
     go Top = f Top
+    go Bot = f Bot
     go (Min a b) = Min <$> go a <*> go b
     go (Max a b) = Max <$> go a <*> go b
+
+pattern PP p ts <- Pattern _ _ (TermPred p : ts)
+pattern PPI p i ts <- Pattern _ (PVar2 i _ _) (TermPred p : ts)

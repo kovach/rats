@@ -71,6 +71,7 @@ executable rats
       , Parser
       , Binding
       , Derp, ParseDerp
+      , GenSouffle, GenDerp
 
     -- LANGUAGE extensions used by modules in this package.
     -- other-extensions:

@@ -18,7 +18,7 @@ var = v
     --cv = T.CVar <$> (char '?' *> variable)
 
 term :: Parser T.Term
-term = cv <|> fv <|> v <|> p <|> rand <|> b
+term = cv <|> fv <|> v <|> p <|> rand <|> b <|> n
   where
     v = T.TermVar <$> var
     p = T.TermPred <$> pred
@@ -26,6 +26,7 @@ term = cv <|> fv <|> v <|> p <|> rand <|> b
     cv = T.TermChoiceVar Nothing <$> (char '?' *> var)
     rand = pure (T.TermExt "$") <* char '$'
     b = pure T.TermBlank <* char '_'
+    n = T.TermNum <$> nat
 
 pattern_ :: Parser T.Pattern
 pattern_ = q <|> a
@@ -63,4 +64,4 @@ pragma = count
   where
     count = char '#' *> (pred)
 
-program = dotTerm ((T.Pragma <$> pragma) <|> (T.Rule <$> optional (ws *> identifier <* ws) <*> expr))
+program = dotTerm ((T.Pragma <$> pragma) <|> (T.Rule <$> optional (ws *> identifier <* char ':' <* ws) <*> expr))

@@ -20,15 +20,13 @@ import Debug.Trace
 
 import Basic
 import Types
-import Parser
+import Parser (program)
 import ParserCombinator
 import MMap (MMap)
 import qualified Derp as D
 import ParseDerp
-
--- todo: one case
-pattern PP p ts <- Pattern _ _ (TermPred p : ts)
-pattern PPI p i ts <- Pattern _ (PVar2 i _ _) (TermPred p : ts)
+import qualified GenSouffle as GS
+import qualified GenDerp as GD
 
 leftEnd t = L (TermVar t)
 rightEnd t = R (TermVar t)
@@ -50,6 +48,7 @@ termVars (TermFreshVar _) = [] -- these elaborate directly into an id constructo
 termVars (TermId (Id _ vs)) = vs -- should be redundant
 termVars (TermPred {}) = []
 termVars (TermExt _) = []
+termVars (TermNum _) = []
 termVars TermBlank = []
 tVars (L t) = termVars t
 tVars (R t) = termVars t
@@ -60,6 +59,7 @@ tVars Top = []
 pattern Lt a b = Cmp OpLt a b
 pattern Eql a b = Cmp OpEq a b
 
+freshAtomVar p | Just (Pred ('#':pr)) <- predPattern p = fresh $ capitalize pr
 freshAtomVar p | Just (Pred pr) <- predPattern p = fresh $ capitalize pr
 freshAtomVar _ = fresh "_id"
 
@@ -83,11 +83,22 @@ patternBoundVars = filter isNegVar . nub . execWriter . eTraverse' go
     go (Atom (Pattern _ _ ts)) = tell (termsVars ts)
     go _ = pure ()
 
+isBuiltin (TermPred (Pred ('#' : _)) : _) = True
+isBuiltin _ = False
+
 schema :: E -> [(Pred, Int)]
 schema = execWriter . eTraverse' go
   where
     go (Atom (PP pr ts)) = do tell [(pr, length ts)]
     go _ = pure ()
+
+-- todo: this should also sometimes yield PosVars
+elabEVars e = eTraverse (pure . go) e
+  where
+    vs = map varName $ patternBoundVars e
+    go (EVar (TermVar (NegVar v))) | not (v `elem` vs) = EVar (TermVar (ExVar v))
+    go (EVar x) = trace ("!!! " <> show x<> " : " <> show vs) $ EVar x
+    go x = x
 
 elabCVars = eTermTraverse go
   where
@@ -100,7 +111,8 @@ elabNegAtoms ruleName e = eTraverse go e
   where
     go (Atom p@(Pattern AtomNeg PVar0 ts)) = do
       m <- freshAtomVar p;
-      pure $ Atom $ Pattern AtomNeg (PVar2 (NegVar m) [] ruleName) ts
+      let var = if isBuiltin ts then ExVar m else NegVar m
+      pure $ Atom $ Pattern AtomNeg (PVar2 var [] ruleName) ts
     go e' = pure e'
 
 elabPosAtoms vs ruleName e = eTraverse go e
@@ -110,15 +122,7 @@ elabPosAtoms vs ruleName e = eTraverse go e
       pure $ Atom $ Pattern AtomPos (PVar2 (PosVar m) vs ruleName) ts
     go e' = pure e'
 
--- todo: this should also sometimes yield PosVars
-elabEVars e = eTraverse (pure . go) e
-  where
-    vs = map varName $ patternBoundVars e
-    go (EVar (TermVar (NegVar v))) | not (v `elem` vs) = EVar (TermVar (ExVar v))
-    go (EVar x) = trace ("!!! " <> show x<> " : " <> show vs) $ EVar x
-    go x = x
-
-elabPosVar vs ruleName e = eTermTraverse go e
+elabPosVars vs ruleName e = eTermTraverse go e
   where
     go (TermFreshVar v) = pure $ TermId $ Id (ruleName <> ":" <> pp v) vs
     go e' = pure e'
@@ -135,13 +139,10 @@ elab' r e = do
   --   positive atoms, and
   --   `TermFreshVar` instances
   elabPosAtoms vs r e1
-    >>= elabPosVar vs r
+    >>= elabPosVars vs r
 
 elab :: (Name, E) -> E
 elab = evalM . uncurry elab'
-
-elabAll :: [Rule] -> [E]
-elabAll = evalM . mapM (uncurry elab')
 
 type MonadPatternWriter m = MonadWriter [Pattern] m
 
@@ -160,6 +161,11 @@ conAnd (I al ar) (I bl br) =
   , [Max al bl `Lt` Min ar br])
 
 check :: MonadPatternWriter m => E -> m I
+check (Atom p@(Pattern AtomNeg (PVar2 v@(ExVar _) _ _) ts)) | isBuiltin ts = do
+  mapM_ checkTerm ts
+  tell [p]
+  pure (I (leftEnd v) (rightEnd v))
+check (Atom (Pattern AtomNeg (PVar2 _ _ _) ts)) | isBuiltin ts = error ""
 check (Atom p@(Pattern sign (PVar2 v vs name) ts)) = do
   mapM_ checkTerm ts
   tell [p, (leftEnd v) `Lt` (rightEnd v)]
@@ -233,7 +239,7 @@ foo = \case
   x | x < 0 -> 2
 
 -- TODO: handle min, max in terms
-quantElimConstraints vs ps = out
+quantElimConstraints vs ps = trace ("evs: " <> pp exVars) out
   where
     chk c x = if c then x else error ""
     out' = nub $ rest <> elimAll <> elimEx
@@ -309,65 +315,8 @@ generateConstraints' e = splitConstraints (posVars e)
   . expandConstraints
   . checkAll $ e
 
-patternCompileDot = (<> ".") . patternCompile
-patternCompile :: Pattern -> String
-patternCompile = \case
-  PPI p i ts -> pp p <> args (pp i : map termCompile ts)
-  p@(Pattern {}) -> error $ pp p
-  Cmp op a b -> opString op <> pwrap (commas $ map tCompile [a,b])
-  Eq a b -> termCompile a <> " = " <> termCompile b
-  IsId t -> "isId" <> pwrap (termCompile t)
-  Val a b -> "Val" <> args [termCompile a, termCompile b]
-opString OpLt = "lt"
-opString OpEq = "eq"
-termCompile :: Term -> String
-termCompile = \case
-  TermVar v -> pp v
-  TermPred pr -> cons "TermPred" [show $ pp pr]
-  TermId i -> cons "TermId" [compileId i]
-  TermFreshVar _ -> error ""
-  TermChoiceVar (Just v) _ -> pp v
-  TermChoiceVar Nothing _ -> error ""
-  TermExt "$" -> cons "TermNum" ["autoinc()"]
-  TermExt _ -> error "unhandled"
-  v@TermBlank -> pp v
-compileId (Id n vs) = cons "Id" [show n, toBinding vs]
-toBinding [] = cons "Nil" []
-toBinding (t:ts) = cons "Bind" [pp t, toBinding ts]
-tCompile = \case
-  L t -> cons "L" [termCompile t]
-  R t -> cons "R" [termCompile t]
-  Min a b -> cons "Min" (map tCompile [a,b])
-  Max a b -> cons "Max" (map tCompile [a,b])
-  Top -> cons "Top" []
-cons s t = "$" <> s <> args t
-
-chunkAtoms [] = ""
-chunkAtoms xs =
-  let (h,t) = splitAt 4 xs in
-      case t of
-        [] -> commas h
-        _ -> commas h <> ",\n" <> chunkAtoms t
-ruleCompile e (body, h) =
-  let comment = "// " <> pp e <> "\n" in
-  comment <>
-    -- Souffle doesn't allow a rule with several heads and no body :)
-    --   but, we don't currently typically generate these
-    if Set.size body == 0 then
-     unwords (map patternCompileDot $ Set.toList h)
-    else
-      chunkAtoms (map patternCompile $ Set.toList h)
-      <> "\n  :-\n"
-      <> chunkAtoms (map patternCompile $ Set.toList body)
-      <> "\n."
-
-schemaCompile :: [Pred] -> (Pred, Int) -> String
-schemaCompile countPreds (p, arity) =
-  ".decl " <> pp p <> args (map (\i -> "x" <> show i <> ":Term") [1..(arity+1)])
-  <> (if p `elem` countPreds then "" else " .output " <> pp p)
-
-compileExp :: (Name, E) -> String
-compileExp (n, e) = ruleCompile e . generateConstraints . elab $ (n, e)
+compileExp :: (Name, E) -> (Set Pattern, Set Pattern)
+compileExp (n, e) = generateConstraints . elab $ (n, e)
 
 compile :: [Statement] -> String
 compile ps = result
@@ -379,11 +328,11 @@ compile ps = result
     notBasic (pr, _) = not (pr `elem` map Pred ["move", "at"])
     sch = filter notBasic $ nub $ concatMap (schema . snd) es
     result = unlines $
-      map (schemaCompile ops) sch
-      <> map compileExp es
+      map (GD.schemaCompile ops) sch
+      <> map (\e -> GD.ruleCompile e (compileExp e)) es
 
 mkFile path p = do
-  prelude <- readFile "prelude.dl"
+  prelude <- GD.readPrelude
   writeFile path $ prelude <> p
 
 demo name rules = do
@@ -407,24 +356,32 @@ demo name rules = do
     byName _ = False
 
 main1 = do
-  pr0 <- readFile "card.tin"
+  pr0 <- readFile "ttt.turn"
   let pr = unlines . takeWhile (/= "exit") . filter (not . (== "--") . take 2) . lines $ pr0
   let name _ r@(Rule (Just _) _) = r
       name n (Rule Nothing r) = Rule (Just n) r
-      name n x = x
+      name _ x = x
   let rules = zipWith name [ "r" <> show i | i <- [1..] ] (assertParse program pr)
-  --let rules = (assertParse program pr)
-  demo "target" rules
+  -- demo "r2" rules
   let result = compile rules
-  mkFile "out.dl" $ result
+  putStrLn $ "generated derp:\n" <> result
+  mkFile "out.derp" $ result
+  pure result
+
+main2' input = do
+  let rs = assertParse prog $ lexComments ";" input
+  --print rs
+  let out = D.iterRules rs
+  putStrLn "\nresult:"
+  mapM_ (putStrLn . spaces . map pp) $ out
+  putStrLn "."
 
 main2 = do
   input <- readFile "test.derp"
-  let rs = assertParse prog input
-  print rs
-  let out = D.iterRules rs
-  putStrLn "result:"
-  mapM_ pprint $ out
-  putStrLn "."
+  main2' input
 
-main = main2
+main3 = do
+  str <- main1
+  main2' str
+
+main = main3

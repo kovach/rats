@@ -156,3 +156,10 @@ variable =
   (single upper <> many idChar) <|>
   (single (char '_') <> many1 idChar)
 
+stringLit = char '"' *> many (charMatch "string char" (/= '"')) <* char '"'
+
+lexComments comment = unlines . map strip . lines
+  where
+    strip [] = []
+    strip s@(c : cs) =
+      if isPrefixOf comment s then [] else c : strip cs

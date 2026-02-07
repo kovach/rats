@@ -5,7 +5,7 @@ import Prelude hiding ( sequence )
 import Data.List
 import Data.Char
 import Data.Maybe (fromMaybe)
-import Control.Monad.Except hiding ( sequence )
+import Control.Monad.Except
 
 newtype Parser a = Parser {unParser :: String -> Either String (a, String)}
 

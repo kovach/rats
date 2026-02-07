@@ -11,10 +11,12 @@ module MMap
   , lookup
   , insert
   , size
+  , filterWithKey
+  , minViewWithKey
   )
 where
 
-import Prelude hiding (null, lookup)
+import Prelude hiding (null, lookup, take)
 import Data.Maybe
 import qualified Data.Map as M
 
@@ -44,6 +46,10 @@ singleton k v = MMap $ M.singleton k v
 null (MMap m) = M.null m
 toList (MMap m) = M.toList m
 size (MMap m) = M.size m
+filterWithKey f (MMap m) = MMap $ M.filterWithKey f m
+minViewWithKey (MMap m) = do
+  (x, m') <- M.minViewWithKey m
+  pure (x, MMap m')
 
 -- Differences in type or behavior from standard Map interface --
 fromList :: (Ord k, Semigroup v) => [(k, v)] -> MMap k v
@@ -58,4 +64,3 @@ lookup k (MMap m) = fromMaybe mempty $ M.lookup k m
 insert :: (Ord k, Semigroup v) => k -> v -> MMap k v -> MMap k v
 insert k v (MMap m) = MMap (insert' k v m)
 -- end --
-

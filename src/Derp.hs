@@ -86,6 +86,9 @@ instance Collection Tuple Tuples where
   one _ = error ""
   member (TermPred p : vs) (Tuples m) = vs `member` MMap.lookup p m
   member _ _ = error ""
+  pick (Tuples ts) = do
+    ((p, vs), ts') <- pick ts
+    pure (TermPred p : vs, Tuples ts')
 
 instance PP Tuples where
   pp (Tuples m) = out
@@ -191,26 +194,26 @@ evalBuiltin b "range" [_, t, TermNum lo, TermNum hi] = do
   case B.unify b t (TermNum i) of
     Just b' -> pure b'
     _ -> []
--- evalBuiltin b "eq" [x, y] = maybeToList $ B.unify b x y
 evalBuiltin _ op as = error $ "unimplemented: " <> op <> args (map pp as)
 
-eval :: CE -> Tuples -> [Binding]
-eval (Closure b Unit) _ = [b]
-eval (Closure b (Bind x y)) _ = maybeToList $ B.unify b x y
-eval (Closure b (SpecialAtom p ts)) _ = evalBuiltin b p ts
-eval (Closure c (Atom (TermPred p : vs))) (Tuples tuples) =
+eval :: CE -> Tuples -> Tuples -> [Binding]
+eval (Closure b Unit) _ _ = [b]
+eval (Closure b (Bind x y)) _ _ = maybeToList $ B.unify b x (subTerm (bind b) y)
+eval (Closure b (SpecialAtom p ts)) _ _ = evalBuiltin b p ts
+eval (Closure c (Atom (TermPred p : vs))) (Tuples tuples) _ =
   concatMap (map context . specialize (Closure c (Atom vs))) (MMap.lookup p tuples)
-eval c@(Closure _ (Atom _)) tuples = error "todo"
-eval (Closure (Binding bs as) (NegAtom at)) _ = [Binding bs (as <> [at])]
-eval (Closure c (Join a b)) tuples = do
-  c' <- eval (Closure c a) tuples
-  c'' <- eval (Closure c' b) tuples
+eval c@(Closure _ (Atom _)) tuples _ = error "todo"
+eval (Closure b@(Binding bs as) (NegAtom at)) _ check =
+  if subst bs at `member` check then [] else [b]
+eval (Closure c (Join a b)) tuples check = do
+  c' <- eval (Closure c a) tuples check
+  c'' <- eval (Closure c' b) tuples check
   pure c''
 
-eval1 :: CE -> Tuple -> Tuples -> [Binding]
-eval1 cl t ts = do
+eval1 :: CE -> Tuple -> Tuples -> Tuples -> [Binding]
+eval1 cl t ts check = do
   cl' <- specialize cl t
-  v <- eval cl' ts
+  v <- eval cl' ts check
   pure v
 
 subTerm ctx = \case
@@ -220,12 +223,7 @@ subTerm ctx = \case
     x -> x
 
 subst :: B.Binding Name Term -> Tuple -> Tuple
-subst ctx tuple = map sub1 tuple
-  where
-    sub1 (TermVar n) = fromJust $ B.lookup n ctx
-    sub1 (TermApp cons ts) = TermApp cons (map sub1 ts)
-    sub1 TermBlank = error ""
-    sub1 x = x
+subst ctx tuple = map (subTerm ctx) tuple
 
 substs :: B.Binding Name Term -> [Tuple] -> [Tuple]
 substs ctx = map (subst ctx)
@@ -233,21 +231,14 @@ substs ctx = map (subst ctx)
 toThunk :: [Tuple] -> Binding -> [Thunk]
 toThunk hd (Binding ctx ns) = [ Thunk (substs ctx hd) (substs ctx ns) ]
 
-step :: Rule -> Tuple -> Tuples -> [Thunk]
-step (Rule body hd) t ts = do
-  b <- eval1 body t ts
+step :: Rule -> Tuple -> Tuples -> Tuples -> [Thunk]
+step (Rule body hd) t ts check = do
+  b <- eval1 body t ts check
   toThunk hd b
 
-evalRule :: Rule -> Tuples -> [Thunk]
-evalRule (Rule body hd) ts = do
-  b <- eval body ts
+evalRule (Rule body hd) ts check = do
+  b <- eval body ts check
   toThunk hd b
-
--- anyVal _ [] = Nothing
--- anyVal map (k:ks) =
---   case Map.lookup k map of
---     Just v -> Just (k,v)
---     Nothing -> anyVal map ks
 
 partitionThunks :: [Thunk] -> ([Thunk], [Thunk])
 partitionThunks = partition (\case Thunk _ deps -> size deps > 0)
@@ -259,30 +250,38 @@ evalThunk db (Thunk hd deps) =
   if any (`member` db) deps then mempty else Set.fromList hd
 evalThunks db ts = mconcatMap (evalThunk db) ts
 
-iter f (ts, thunks, db) =
-  case take ts of
-    Nothing ->
-      if size thunks > 0
-         then -- todo
-           let new_ = evalThunks db thunks
-            in iter f (new_, none, db)
-         else db
+iter f ts (changed, base) db check =
+  case pick ts of
+    Nothing -> (db, changed)
     Just (t, ts') -> st
       where
-        hs = f t db
-        (blocked, new_) = partitionThunks hs
+        new_ = f t db check
         tuples = mconcatMap takeThunk new_
         new = Set.filter (not . (`member` db)) tuples
-        st = iter f (ts' <> new, thunks <> blocked, db <> one t)
+        changed' = changed <> Set.filter (not . (`member` base)) new -- accum values for debugging only
+        st = iter f (ts' <> new) (changed', base) (db <> one t) check
 
---iterStrata ts fs = iterStrata' fs (ts, mempty, ofList ts) fs
---iterStrata' f0 (_, delta, old) [] = if Set.size delta == 0 then old else iterStrata (Set.toList old) f0
---iterStrata' f0 (ts, delta, old) (f:fs) =
---  let (delta', old') = iter f (ts, delta, old)
---   in iterStrata' f0 (Set.toList old', delta', old') fs
+tracen False _ a = a
+tracen True m a = trace m a
+
+-- Alternating fixpoint
+altIter 0 _ _ _ = error "gas"
+altIter n ts0 f v = trace ("STEP: " <> show n) $ out
+  where
+    db1 = False
+    (v1, gen1) = iter f ts0 (none, v) mempty v
+    (v2, gen2) = iter f ts0 (none, v) mempty v1
+    out =
+      if isEmpty gen1 -- happens when program has no unfounded atoms
+      then v1
+      else tracen db1 ("g1: " <> show gen1 <> "\n") $
+           if isEmpty gen2
+           then v2
+           else tracen db1 ("g2: " <> show gen2 <> "\n") $
+                altIter (n-1) ts0 f v2
 
 applyRules :: [Rule] -> Tuples -> Set Tuple
-applyRules rules ts = mconcatMap takeThunk $ mconcat $ map (\r -> evalRule r ts) rules
+applyRules rules ts = mconcatMap takeThunk $ mconcat $ map (\r -> evalRule r ts mempty) rules
 
 iterRules allRules = result
   where
@@ -292,9 +291,9 @@ iterRules allRules = result
     unitBody _ = False
     hasNegation (Rule (Closure _ e) _) = length (findNegations e) > 0
     ts0 = applyRules start mempty
-    f rules t old = mconcat $ map (\r -> step r t old) rules
-    -- fs = (map f [positive, negative])
-    result = iter (f rest) (ts0, mempty, mempty)
+    f :: [Rule] -> Tuple -> Tuples -> Tuples -> [Thunk]
+    f rules t old check = mconcat $ map (\r -> step r t old check) rules
+    result = altIter 10 ts0 (f rest) mempty
 
 ce = Closure mempty
 

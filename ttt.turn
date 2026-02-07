@@ -1,0 +1,16 @@
+-- Setup --
+setup: !setup; !turn ~ !player o.
+
+?setup / (
+  ?#range I 1 3 | ?#range J 1 3
+  | !cell !C | !row !C I | !col !C J
+).
+
+?setup / ( !other o x, !other x o ).
+
+!move a there; !move b there; !move a here; !f.
+
+-- expect 2 results
+(?at X Y, ?f) / !z X Y.
+
+exit

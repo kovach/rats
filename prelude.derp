@@ -1,11 +1,13 @@
 eq A B -- le A B.
+eq B A -- le A B.
 lt A B -- le A B.
 le A B, le B C -- le A C.
 le A B, lt B C -- lt A C.
 lt A B, le B C -- lt A C.
+lt A A -- zzz A.
 
 ; move : id / it / to
-move Id It _, le r(Id) T
+move Id It _, lt r(Id) T
 ---
 moveBefore Id It T.
 
@@ -21,6 +23,6 @@ move M It At, NewId = id("at", bind(M, nil()))
 ----------------------------------------------
 isId NewId, at NewId It At, move_at M NewId, eq l(NewId) r(M).
 
-isId T, last Move _ l(T), move_at M Id
+isId T, last Move _ l(T), move_at Move Id
 --------------------------------------
 lt l(T) r(Id).

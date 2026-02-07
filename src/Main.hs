@@ -24,6 +24,7 @@ import Types
 import Parser (program)
 import ParserCombinator
 import MMap (MMap)
+import qualified MMap as M
 import qualified Derp as D
 import ParseDerp
 import qualified GenSouffle as GS
@@ -357,8 +358,8 @@ demo name rules = do
     byName _ = False
 
 main1 = do
-  pr0 <- readFile "card.tin"
-  --pr0 <- readFile "ttt.turn"
+  --pr0 <- readFile "card.tin"
+  pr0 <- readFile "ttt.turn"
   let pr = unlines . takeWhile (/= "exit") . filter (not . (== "--") . Data.List.take 2) . lines $ pr0
   let name _ r@(Rule (Just _) _) = r
       name n (Rule Nothing r) = Rule (Just n) r
@@ -375,10 +376,12 @@ main1 = do
 main2' input = do
   let rs = assertParse prog $ lexComments ";" input
   -- print rs
-  let out = D.iterRules rs
+  let D.Tuples ts = D.iterRules rs
+      hide :: [String] = ["le", "lt"]
+      out' = D.Tuples $ M.filterWithKey (\k _ -> not (k `member` hide)) ts
   putStrLn "\nresult:"
-  pprint $ out
-  print $ size out
+  pprint $ out'
+  print $ size out'
   putStrLn "."
 
 main2 = do

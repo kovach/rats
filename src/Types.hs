@@ -38,6 +38,7 @@ data Term = TermPred Pred
           | TermChoiceVar (Maybe Var) Var
           | TermBlank
           | TermExt String
+          | TermApp Name [Term]
   deriving (Show, Eq, Ord)
 
 data Op = OpLt
@@ -49,25 +50,33 @@ opIneq = \case
 data AtomType
   = AtomNeg
   | AtomPos
+  | AtomAsk
   deriving (Show, Eq, Ord)
 
 isPositive AtomPos = True
 isPositive AtomNeg = False
+isPositive AtomAsk = False
 
 data PVar
   = PVar2 Var [Var] Name
   | PVar0
   deriving (Show, Eq, Ord)
 
-data Pattern
-  = Pattern { ty :: AtomType, id :: PVar, terms :: [Term] }
+data Pattern = Pattern { ty :: AtomType, id :: PVar, terms :: [Term] }
+  deriving (Show, Eq, Ord)
+
+data Constraint
+  = Constraint Pattern
+  | NegChose Var
   | Cmp Op T T
   | Eq Term Term
   | IsId Term
   | Val Term Term
+  | Try Pattern
   deriving (Show, Eq, Ord)
 
---pattern IdPattern ty i terms = Pattern ty (Just i) terms
+pattern Lt a b = Cmp OpLt a b
+pattern Eql a b = Cmp OpEq a b
 
 data E = Atom Pattern
        | EVar Term
@@ -83,7 +92,10 @@ data E = Atom Pattern
   deriving (Show, Eq, Ord)
 
 -- todo: generate count summary for each Pragma
-data Statement = Pragma Pred | Rule (Maybe Name) E
+data Statement = Pragma Pred | RuleStatement (Maybe Name) E
+  deriving (Show, Eq, Ord)
+
+data Rule = Rule { body :: Set Constraint, head :: Set Constraint }
   deriving (Show, Eq, Ord)
 
 type Ms b c a = (State (MMap b c)) a
@@ -129,18 +141,23 @@ instance PP Term where
   pp (TermChoiceVar _ v) = "?" <> pp v
   pp (TermExt s) = s
   pp TermBlank = "_"
+  pp t@(TermApp _ _) = show t
 instance PP AtomType where
   pp AtomNeg = "?"
   pp AtomPos = "!"
+  pp AtomAsk = "∃"
 instance PP Pattern where
   pp (Pattern sign PVar0 c) = pp sign <> (pwrap . unwords . map pp $ c)
   pp (Pattern sign (PVar2 i vs n) c) =
     pp sign <> pwrap (pp i <> "=" <> pp (Id n vs)) <> ":"
     <> (pwrap . unwords . map pp $ c)
+instance PP Constraint where
+  pp (Constraint p) = pp p
   pp (Cmp op a b) = pp a <> spwrap (pp op) <> pp b
   pp (Eq a b) = pp a <> spwrap "=" <> pp b
   pp (Val a b) = "Val " <> pp a <> " " <> pp b
   pp (IsId t) = "IsId " <> pp t
+  pp (Try t) = "Try " <> pp t
 instance PP Op where
   pp OpLt = "<"
   pp OpEq = "="
@@ -155,6 +172,9 @@ instance PP E where
   pp (Under a b) = pwrap $ pp a <> " \\ " <> pp b
   pp (Same a b) = pwrap $ pp a <> " ~ " <> pp b
   pp (At a b) = pwrap $ pp a <> " @ " <> pp b
+
+tryPred = "try__"
+chosePred = "chose__"
 
 eTraverse :: Applicative m => (E -> m E) -> E -> m E
 eTraverse f = go

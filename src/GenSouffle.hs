@@ -21,11 +21,14 @@ import Parser
 import ParserCombinator
 import MMap (MMap)
 
-patternCompileDot = (<> ".") . patternCompile
+patternCompileDot = (<> ".") . constraintCompile
 patternCompile :: Pattern -> String
 patternCompile = \case
   PPI p i ts -> pp p <> args (pp i : map termCompile ts)
   p@(Pattern {}) -> error $ pp p
+constraintCompile :: Constraint -> String
+constraintCompile = \case
+  Constraint p -> patternCompile p
   Cmp op a b -> opString op <> pwrap (commas $ map tCompile [a,b])
   Eq a b -> termCompile a <> " = " <> termCompile b
   IsId t -> "isId" <> pwrap (termCompile t)
@@ -69,9 +72,9 @@ ruleCompile original (body, h) =
     if Set.size body == 0 then
      unwords (map patternCompileDot $ Set.toList h)
     else
-      chunkAtoms (map patternCompile $ Set.toList h)
+      chunkAtoms (map constraintCompile $ Set.toList h)
       <> "\n  :-\n"
-      <> chunkAtoms (map patternCompile $ Set.toList body)
+      <> chunkAtoms (map constraintCompile $ Set.toList body)
       <> "\n."
 
 schemaCompile :: [Pred] -> (Pred, Int) -> String

@@ -13,4 +13,6 @@ setup: !setup; !turn ~ !player o.
 -- expect 2 results
 (?at X Y, ?f) / !z X Y.
 
+?turn / ( ∃choice !C ).
+
 exit

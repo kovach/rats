@@ -46,6 +46,7 @@ instance (PP k, PP v) => PP (Binding k v) where
     intercalate " / " $
       map (\(k, v) -> pp k <> " " <> pp v) bs
 
+-- (right to left) unification
 class Unify bind a b | a b -> bind where
   unify :: bind -> a -> b -> Maybe bind
 

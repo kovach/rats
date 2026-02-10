@@ -26,3 +26,14 @@ isId NewId, at NewId It At, move_at M NewId, eq l(NewId) r(M).
 isId T, last Move _ l(T), move_at Move Id
 --------------------------------------
 lt l(T) r(Id).
+
+; ?turn / ∃choice ?C.
+; ->
+; turn T, CHOICE = id(...), C = choice(id(...))
+; --
+; try choice(CHOICE, C).
+; split separate rule, so base rule is simpler?
+
+; try choice(CH, ...), !chose(CH)
+; ---
+; choice CH ....

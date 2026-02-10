@@ -39,27 +39,17 @@ predPattern _ = Nothing
 
 patternVars (Pattern _ PVar0 ts) = termsVars ts
 patternVars (Pattern _ (PVar2 i _ _) ts) = i : termsVars ts
-patternVars (Cmp _ a b) = tVars a <> tVars b
-patternVars (IsId t) = termVars t
-patternVars (Eq a b) = termVars a <> termVars b
-patternVars (Val a b) = termVars a <> termVars b
+-- constraintVars: junk
 termsVars = concatMap termVars
 termVars (TermVar v) = [v]
 termVars (TermChoiceVar _ v) = [v]
+termVars (TermApp _ ts) = termsVars ts
 termVars (TermFreshVar _) = [] -- these elaborate directly into an id constructor
 termVars (TermId (Id _ vs)) = vs -- should be redundant
 termVars (TermPred {}) = []
 termVars (TermExt _) = []
 termVars (TermNum _) = []
 termVars TermBlank = []
-tVars (L t) = termVars t
-tVars (R t) = termVars t
-tVars (Min a b) = tVars a <> tVars b
-tVars (Max a b) = tVars a <> tVars b
-tVars Top = []
-
-pattern Lt a b = Cmp OpLt a b
-pattern Eql a b = Cmp OpEq a b
 
 freshAtomVar p | Just (Pred ('#':pr)) <- predPattern p = fresh $ capitalize pr
 freshAtomVar p | Just (Pred pr) <- predPattern p = fresh $ capitalize pr
@@ -122,14 +112,15 @@ elabPosAtoms vs ruleName e = eTraverse go e
     go (Atom p@(Pattern AtomPos PVar0 ts)) = do
       m <- freshAtomVar p;
       pure $ Atom $ Pattern AtomPos (PVar2 (PosVar m) vs ruleName) ts
+    go (Atom p@(Pattern AtomAsk PVar0 ts)) = do
+      m <- freshAtomVar p;
+      pure $ Atom $ Pattern AtomAsk (PVar2 (PosVar m) vs ruleName) ts
     go e' = pure e'
 
 elabPosVars vs ruleName e = eTermTraverse go e
   where
     go (TermFreshVar v) = pure $ TermId $ Id (ruleName <> ":" <> pp v) vs
     go e' = pure e'
-
-type Rule = (Name, E)
 
 elab' r e = do
   -- mark existential variables,
@@ -146,7 +137,7 @@ elab' r e = do
 elab :: (Name, E) -> E
 elab = evalM . uncurry elab'
 
-type MonadPatternWriter m = MonadWriter [Pattern] m
+type MonadPatternWriter m = MonadWriter [Constraint] m
 
 checkTerm :: MonadPatternWriter m => Term -> m ()
 checkTerm = \case
@@ -165,17 +156,22 @@ conAnd (I al ar) (I bl br) =
 check :: MonadPatternWriter m => E -> m I
 check (Atom p@(Pattern AtomNeg (PVar2 v@(ExVar _) _ _) ts)) | isBuiltin ts = do
   mapM_ checkTerm ts
-  tell [p]
+  tell [Constraint p]
   pure (I (leftEnd v) (rightEnd v))
 check (Atom (Pattern AtomNeg (PVar2 _ _ _) ts)) | isBuiltin ts = error ""
 check (Atom p@(Pattern sign (PVar2 v vs name) ts)) = do
   mapM_ checkTerm ts
-  tell [p, (leftEnd v) `Lt` (rightEnd v)]
   case sign of
     AtomPos -> do
+      tell [Constraint p, (leftEnd v) `Lt` (rightEnd v)]
       let i = TermId $ Id (name <> ":__" <> pp v) vs
       tell [Eq (TermVar v) i, IsId (TermVar v)]
-    _ -> pure ()
+    AtomNeg -> do
+      tell [Constraint p, (leftEnd v) `Lt` (rightEnd v)]
+    AtomAsk -> do
+      tell [Try p, (leftEnd v) `Lt` (rightEnd v)]
+      let i = TermId $ Id (name <> ":__" <> pp v) vs
+      tell [Eq (TermVar v) i, IsId (TermVar v)]
   pure (I (leftEnd v) (rightEnd v))
 check (EVar t) = do
   tell [L t `Lt` R t]
@@ -220,11 +216,11 @@ check (Same a b) = do
   tell [al `Eql` bl, br `Eql` ar]
   pure $ I al ar
 
-checkAll :: E -> [Pattern]
+checkAll :: E -> [Constraint]
 checkAll = snd . runWriter . check
 
 -- expand and simplify constrains:
-expandConstraint :: Pattern -> [Pattern]
+expandConstraint :: Constraint -> [Constraint]
 expandConstraint (Cmp op (Max a b) c) | opIneq op = expandConstraints [Cmp op a c, Cmp op b c]
 expandConstraint (Cmp op a (Min b c)) | opIneq op = expandConstraints [Cmp op a b, Cmp op a c]
 expandConstraint (Cmp OpEq a a') | a == a' = []
@@ -233,12 +229,8 @@ expandConstraint (Cmp _ _ Top) = []
 -- expandConstraint p@(Cmp _ _ (Max _ _)) = error $ pp p  -- no disjunctive comparisons
 expandConstraint x = [x]
 
-expandConstraints :: [Pattern] -> [Pattern]
+expandConstraints :: [Constraint] -> [Constraint]
 expandConstraints = concatMap expandConstraint
-
-foo = \case
-  x | x > 0 -> 1
-  x | x < 0 -> 2
 
 -- TODO: handle min, max in terms
 quantElimConstraints vs ps = trace ("evs: " <> pp exVars) out
@@ -291,19 +283,22 @@ tContainsId vs = \case
   Min t1 t2 -> tContainsId vs t1 || tContainsId vs t2
   Max t1 t2 -> tContainsId vs t1 || tContainsId vs t2
   Top -> False
+  Bot -> False
 
-isPos _ (Pattern AtomPos _ _) = True
-isPos _ (Pattern{}) = False
+isPos _ (Constraint (Pattern AtomPos _ _)) = True
+isPos _ (Constraint (Pattern{})) = False
 isPos _ (Eq _ _) = False
 isPos _ (Val _ _) = False
 isPos vs (Cmp _ a b) = any (tContainsId vs) [a,b]
 isPos vs (IsId t) = termContainsId vs t
+isPos _ (Try _) = True
 
-splitConstraints :: [Var] -> [Pattern] -> (Set Pattern, Set Pattern)
+splitConstraints :: [Var] -> [Constraint] -> Rule
 splitConstraints pvs x =
   let (pos, neg) = partition (isPos pvs) x
-   in (Set.fromList neg, Set.fromList pos)
+   in Rule (Set.fromList neg) (Set.fromList pos)
 
+generateConstraints :: E -> Rule
 generateConstraints e = splitConstraints (posVars e)
   . expandConstraints
   . quantElimConstraints (vars e)
@@ -317,21 +312,36 @@ generateConstraints' e = splitConstraints (posVars e)
   . expandConstraints
   . checkAll $ e
 
-compileExp :: (Name, E) -> (Set Pattern, Set Pattern)
-compileExp (n, e) = generateConstraints . elab $ (n, e)
+compileExp :: (Name, E) -> [Rule]
+compileExp pr@(_, _) = one r <> tryPatterns
+  where
+    r@(Rule _ h) = generateConstraints . elab $ pr
+    tryPatterns = mapMaybe fixTry $ Set.toList h
+    fixTry (Try p) = Just $ Rule b' h'
+      where
+        p' = freshPattern p
+        b' = Set.fromList $ [Try p', NegChose x]
+        h' = Set.fromList $ [Constraint p']
+    fixTry _ = Nothing
+    x = NegVar "X"
+    freshPattern (Pattern sign (PVar2 _ ds n) (p : vs)) =
+      Pattern sign (PVar2 x ds n) ts'
+        where
+          ts' = p : (map (\i -> TermVar $ NegVar $ "X" <> show i) [1.. length vs])
+    freshPattern _ = error ""
 
 compile :: [Statement] -> String
 compile ps = result
   where
     (ops, es) = partitionEithers $ map isOp ps
     isOp (Pragma p) = Left p
-    isOp (Rule (Just n) e) = Right (n,e)
-    isOp (Rule Nothing _) = error ""
+    isOp (RuleStatement (Just n) e) = Right (n,e)
+    isOp (RuleStatement Nothing _) = error ""
     notBasic (pr, _) = not (pr `elem` map Pred ["move", "at"])
     sch = filter notBasic $ nub $ concatMap (schema . snd) es
     result = unlines $
       map (GD.schemaCompile ops) sch
-      <> map (\e -> GD.ruleCompile e (compileExp e)) es
+      <> map (\e -> GD.ruleBlockCompile e (compileExp e)) es
 
 mkFile path p = do
   prelude <- GD.readPrelude
@@ -339,7 +349,7 @@ mkFile path p = do
 
 demo name rules = do
     case find (byName) rules of
-      Just (Rule _ r) -> do
+      Just (RuleStatement _ r) -> do
         let f = (name, r)
         --let f = (name, fromJust $ lookup name rules)
         pprint $ snd f
@@ -347,22 +357,22 @@ demo name rules = do
         let f' = elab f
         pprint f'
         putStrLn "~~~~~~~~~"
-        let (body, h) = generateConstraints' f'
+        let Rule body h = generateConstraints' f' -- todo
         mapM_ pprint body
         putStrLn "---------"
         mapM_ pprint h
         putStrLn "~~~~~~~~~"
       _ -> error ""
   where
-    byName (Rule (Just n) _) | n == name = True
+    byName (RuleStatement (Just n) _) | n == name = True
     byName _ = False
 
 main1 = do
   --pr0 <- readFile "card.tin"
   pr0 <- readFile "ttt.turn"
   let pr = unlines . takeWhile (/= "exit") . filter (not . (== "--") . Data.List.take 2) . lines $ pr0
-  let name _ r@(Rule (Just _) _) = r
-      name n (Rule Nothing r) = Rule (Just n) r
+  let name _ r@(RuleStatement (Just _) _) = r
+      name n (RuleStatement Nothing r) = RuleStatement (Just n) r
       name _ x = x
   let rules = zipWith name [ "r" <> show i | i <- [1..] ] (assertParse program pr)
   -- demo "r2" rules

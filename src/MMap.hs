@@ -20,6 +20,7 @@ import Prelude hiding (null, lookup, take)
 import Data.Maybe
 import qualified Data.Map as M
 
+-- "Monoid Map": the correct Monoid instance for Map
 newtype MMap k v = MMap (M.Map k v)
   deriving (Show, Eq, Ord)
 
@@ -35,6 +36,7 @@ insertWithKey f k v m = M.alter (\case
 
 instance (Ord k, Semigroup v) => Semigroup (MMap k v) where
   (MMap a) <> (MMap b) = MMap $ M.foldrWithKey insert' a b
+
 instance (Ord k, Semigroup v) => Monoid (MMap k v) where
   mempty = MMap M.empty
 

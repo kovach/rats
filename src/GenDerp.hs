@@ -1,5 +1,5 @@
 module GenDerp
-  ( readPrelude, ruleCompile, schemaCompile )
+  ( readPrelude, ruleCompile, ruleBlockCompile, schemaCompile )
   where
 
 import Prelude hiding (pred, exp)
@@ -26,26 +26,36 @@ patternCompile :: Pattern -> String
 patternCompile = \case
   PPI p i ts -> spaces (pp p : pp i : map termCompile ts)
   p@(Pattern {}) -> error $ pp p
-  Cmp op a b -> spaces $ opString op : map tCompile [a,b]
-  Eq a b -> termCompile a <> " = " <> termCompile b
-  IsId t -> "isId" <> " " <> termCompile t
-  Val a b -> spaces $ "Val" : [termCompile a, termCompile b]
+constraintCompile :: Constraint -> String
+constraintCompile = \case
+  Constraint p -> patternCompile p
+  NegChose v -> "!" <> spaces [chosePred, varCompile v]
+  Cmp op a b -> spaces [opString op, tCompile a, tCompile b]
+  Eq a b -> spaces [termCompile a, "=", termCompile b]
+  IsId t -> spaces ["isId", termCompile t]
+  Val a b -> spaces ["val", termCompile a, termCompile b]
+  Try (PPI p i ts) -> spaces [tryPred, cons (pp p) (pp i : termsCompile ts)]
+  Try p -> error $ show p
 opString OpLt = "lt"
 opString OpEq = "eq"
+varCompile = \case
+  ExVar _ -> error "exvar in output"
+  v -> pp v
 termCompile :: Term -> String
 termCompile = \case
-  TermVar (ExVar _) -> error "exvar in output"
-  TermVar v -> pp v
+  TermVar v -> varCompile v
   TermPred pr -> pp pr
   TermNum n -> show n
-  TermId i -> compileId i
+  TermId i -> idCompile i
+  TermApp c ts -> cons c $ termsCompile ts
   TermFreshVar _ -> error ""
   TermChoiceVar (Just v) _ -> pp v
   TermChoiceVar Nothing _ -> error ""
   TermExt "$" -> "autoinc()"
   TermExt _ -> error "unhandled"
   v@TermBlank -> pp v
-compileId (Id n vs) = cons "id" [show n, toBinding vs]
+termsCompile = map termCompile
+idCompile (Id n vs) = cons "id" [show n, toBinding vs]
 toBinding [] = cons "nil" []
 toBinding (t:ts) = cons "bind" [pp t, toBinding ts]
 tCompile = \case
@@ -64,18 +74,15 @@ chunkAtoms xs =
         [] -> commas h
         _ -> commas h <> ",\n" <> chunkAtoms t
 
-ruleCompile (name, original) (body, h) =
+ruleBlockCompile (name, original) rules =
   let comment = "; " <> name <> ": " <> pp original <> "\n" in
-  comment <>
-    -- Souffle doesn't allow a rule with several heads and no body :)
-    --   but, we don't currently typically generate these
-    if Set.size body == 0 then
-     unwords (map patternCompileDot $ Set.toList h)
-    else
-      chunkAtoms (map patternCompile $ Set.toList body)
-      <> "\n---\n"
-      <> chunkAtoms (map patternCompile $ Set.toList h)
-      <> ".\n"
+  comment <> concatMap ruleCompile rules
+
+ruleCompile (Rule body h) =
+    chunkAtoms (map constraintCompile $ Set.toList body)
+    <> "\n---\n"
+    <> chunkAtoms (map constraintCompile $ Set.toList h)
+    <> ".\n"
 
 -- todo
 schemaCompile :: [Pred] -> (Pred, Int) -> String

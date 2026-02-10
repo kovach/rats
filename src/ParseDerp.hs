@@ -30,6 +30,6 @@ rule = do
   body <- expr
   _ <- ws *> string "--" *> (many (char '-')) *> ws
   hs <- commaSep tuple
-  pure $ T.Rule (T.ce body) hs
+  pure $ T.Rule (T.Closure mempty body) hs
 
 prog = dotTerm rule

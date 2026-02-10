@@ -29,10 +29,11 @@ term = cv <|> fv <|> v <|> p <|> rand <|> b <|> n
     n = T.TermNum <$> nat
 
 pattern_ :: Parser T.Pattern
-pattern_ = q <|> a
+pattern_ = q <|> a <|> k
   where
     q = T.Pattern T.AtomNeg T.PVar0 <$> (char '?' *> wsSep term)
     a = T.Pattern T.AtomPos T.PVar0 <$> (char '!' *> wsSep term)
+    k = T.Pattern T.AtomAsk T.PVar0 <$> (char '∃' *> wsSep term)
 
 expr1 :: Parser T.E
 expr1 = at <|> p <|> af <|> vr
@@ -64,4 +65,7 @@ pragma = count
   where
     count = char '#' *> (pred)
 
-program = dotTerm ((T.Pragma <$> pragma) <|> (T.Rule <$> optional (ws *> identifier <* char ':' <* ws) <*> expr))
+program = dotTerm (pr <|> rl)
+  where
+    pr = T.Pragma <$> pragma
+    rl = T.RuleStatement <$> optional (ws *> identifier <* char ':' <* ws) <*> expr

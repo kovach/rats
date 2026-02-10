@@ -49,12 +49,15 @@ args = pwrap . intercalate ", "
 assert a b | a == b = putStrLn "ok"
 assert a b = error $ "not-equal:\n" <> pp a <> "\n\n" <> pp b
 
+mconcatMap f = mconcat . map f
+
 class Monoid b => Collection' b where
   none :: b
   none = mempty
   size :: b -> Int
   isEmpty :: b -> Bool
   isEmpty = (== 0) . size
+
 class (Collection' b, Monoid b) => Collection a b where
   one :: a -> b
   ofList :: [a] -> b
@@ -75,6 +78,7 @@ instance Eq a => Collection a [a] where
 instance Ord a => Collection' (Set a) where
   size = length
   isEmpty = isNothing . Set.minView
+
 instance Ord a => Collection a (Set a) where
   one = Set.singleton
   member = elem
@@ -83,6 +87,7 @@ instance Ord a => Collection a (Set a) where
 instance Ord k => Collection' (Map k c) where
   size = length
   isEmpty = isNothing . Map.minView
+
 instance (Ord k, Collection v c) => Collection (k, v) (Map k c) where
   one (k, v) = Map.singleton k (one v)
   pick m = do
@@ -97,6 +102,7 @@ instance (Ord k, Collection v c) => Collection (k, v) (Map k c) where
 instance (Ord k, Semigroup c) => Collection' (MMap k c) where
   size = size
   isEmpty = isNothing . MMap.minViewWithKey
+
 instance (Ord k, Collection v c) => Collection (k, v) (MMap k c) where
   one (k, v) = MMap.singleton k (one v)
   pick m = do

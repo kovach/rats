@@ -70,8 +70,8 @@ executable rats
       , MMap
       , Parser
       , Binding
-      , Derp, ParseDerp
-      , GenSouffle, GenDerp
+      , Derp.Types, Derp.Core, Derp.Parse
+      , GenSouffle, Derp.Gen
       , Server
 
     -- LANGUAGE extensions used by modules in this package.

@@ -1,10 +1,10 @@
-module ParseDerp where
+module Derp.Parse where
 
 import Prelude hiding (pred)
 import Data.Maybe
 
 import ParserCombinator
-import qualified Derp as T
+import qualified Derp.Core as T
 
 term :: Parser T.Term
 term = app <|> v <|> p <|> b <|> n <|> str

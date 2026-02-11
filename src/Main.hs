@@ -25,10 +25,10 @@ import Parser (program)
 import ParserCombinator
 import MMap (MMap)
 import qualified MMap as M
-import qualified Derp as D
-import ParseDerp
+import qualified Derp.Core as D
+import Derp.Parse
 import qualified GenSouffle as GS
-import qualified GenDerp as GD
+import qualified Derp.Gen as GD
 import Server (runServer)
 
 leftEnd t = L (TermVar t)

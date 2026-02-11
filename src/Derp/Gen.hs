@@ -1,4 +1,4 @@
-module GenDerp
+module Derp.Gen
   ( readPrelude, ruleCompile, ruleBlockCompile, schemaCompile )
   where
 

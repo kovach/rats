@@ -10,7 +10,7 @@ import Network.HTTP.Types (status200, status404)
 import qualified Data.ByteString.Lazy as LBS
 import Control.Exception (catch, SomeException)
 
-import qualified Derp as D
+import qualified Derp.Types as D
 
 port :: Int
 port = 8080

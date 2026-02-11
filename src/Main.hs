@@ -29,6 +29,7 @@ import qualified Derp as D
 import ParseDerp
 import qualified GenSouffle as GS
 import qualified GenDerp as GD
+import Server (runServer)
 
 leftEnd t = L (TermVar t)
 rightEnd t = R (TermVar t)
@@ -402,4 +403,6 @@ main3 = do
   str <- main1
   main2' str
 
-main = main3
+main = do
+  main3
+  runServer

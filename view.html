@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Derp - Tuples</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #1e1e2e; color: #cdd6f4; font-family: 'Fira Mono', 'Consolas', monospace; font-size: 14px; padding: 24px; }
+  h1 { font-size: 18px; margin-bottom: 16px; color: #89b4fa; }
+  h2 { font-size: 15px; margin: 20px 0 8px; color: #a6e3a1; border-bottom: 1px solid #313244; padding-bottom: 4px; }
+  table { border-collapse: collapse; margin-bottom: 12px; }
+  th, td { text-align: left; padding: 3px 12px 3px 0; }
+  th { color: #9399b2; font-weight: normal; }
+  td { color: #cdd6f4; }
+  .status { color: #9399b2; font-style: italic; }
+</style>
+</head>
+<body>
+<h1>Derp — Tuples</h1>
+<div id="status" class="status">Connecting…</div>
+<div id="content"></div>
+<script>
+function renderTerm(t) {
+  switch (t.tag) {
+    case 'app':  return t.name + '(' + t.args.map(renderTerm).join(', ') + ')';
+    case 'var':  return t.name;
+    case 'pred': return t.name;
+    case 'num':  return String(t.value);
+    case 'string': return '"' + t.value + '"';
+    case 'blank': return '_';
+    default: return JSON.stringify(t);
+  }
+}
+function render(data) {
+  var html = '';
+  var preds = Object.keys(data).sort();
+  for (var i = 0; i < preds.length; i++) {
+    var pred = preds[i];
+    var rows = data[pred];
+    html += '<h2>' + pred + ' (' + rows.length + ')</h2>';
+    html += '<table>';
+    for (var j = 0; j < rows.length; j++) {
+      html += '<tr>';
+      var tuple = rows[j];
+      for (var k = 0; k < tuple.length; k++) {
+        html += '<td>' + renderTerm(tuple[k]) + '</td>';
+      }
+      html += '</tr>';
+    }
+    html += '</table>';
+  }
+  document.getElementById('content').innerHTML = html;
+}
+var ws = new WebSocket('ws://' + location.host + '/');
+ws.onopen = function() { document.getElementById('status').textContent = 'Connected'; };
+ws.onmessage = function(e) {
+  document.getElementById('status').textContent = '';
+  render(JSON.parse(e.data));
+};
+ws.onclose = function() { document.getElementById('status').textContent = 'Disconnected'; };
+ws.onerror = function() { document.getElementById('status').textContent = 'Error'; };
+</script>
+</body>
+</html>

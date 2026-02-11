@@ -1,3 +1,4 @@
+{-# LANGUAGE OverloadedStrings #-}
 -- "DERiving Predicates"
 module Derp where
 
@@ -12,6 +13,8 @@ import Data.Map (Map)
 import qualified Data.Map as Map
 import Control.Monad.Writer
 import Debug.Trace
+import Data.Aeson (ToJSON(..), Value(..), object, (.=))
+import qualified Data.Aeson.Key as Key
 
 import Basic
 import qualified Binding as B
@@ -98,6 +101,19 @@ instance PP Tuples where
       --fix (k, vs) = map (TermPred k:) $ toTuples vs
       tuples = mconcat $ map fix $ MMap.toList m
       out = unlines . map pp $ tuples
+
+instance ToJSON Term where
+  toJSON (TermVar v)      = object ["tag" .= ("var" :: String), "name" .= v]
+  toJSON (TermPred p)     = object ["tag" .= ("pred" :: String), "name" .= p]
+  toJSON (TermNum i)      = object ["tag" .= ("num" :: String), "value" .= i]
+  toJSON TermBlank        = object ["tag" .= ("blank" :: String)]
+  toJSON (TermApp n ts)   = object ["tag" .= ("app" :: String), "name" .= n, "args" .= ts]
+  toJSON (TermString s)   = object ["tag" .= ("string" :: String), "value" .= s]
+
+instance ToJSON Tuples where
+  toJSON (Tuples m) = object
+    [ Key.fromString k .= map toJSON (Set.toList vs)
+    | (k, vs) <- MMap.toList m ]
 
 instance B.Unify Binding Term Term where
   unify b TermBlank _ = pure b

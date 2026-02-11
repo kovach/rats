@@ -394,6 +394,7 @@ main2' input = do
   pprint $ out'
   print $ size out'
   putStrLn "."
+  pure out'
 
 main2 = do
   input <- readFile "test.derp"
@@ -404,5 +405,5 @@ main3 = do
   main2' str
 
 main = do
-  main3
-  runServer
+  tuples <- main3
+  runServer tuples

@@ -1,10 +1,14 @@
 module Parser where
 
-import Prelude hiding (pred)
+import Prelude hiding (pred, lex)
 import Data.Maybe
 
+import Basic
 import ParserCombinator
 import qualified Types as T
+
+lex = lexComments "--" .> lines .> takeWhile (/= "exit") .> unlines
+parse = lex .> assertParse program
 
 pred :: Parser T.Pred
 pred = p
@@ -15,7 +19,6 @@ var :: Parser T.Var
 var = v
   where
     v = T.NegVar <$> variable
-    --cv = T.CVar <$> (char '?' *> variable)
 
 term :: Parser T.Term
 term = cv <|> fv <|> v <|> p <|> rand <|> b <|> n

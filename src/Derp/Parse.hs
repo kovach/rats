@@ -1,10 +1,14 @@
 module Derp.Parse where
 
-import Prelude hiding (pred)
+import Prelude hiding (pred, lex)
 import Data.Maybe
 
+import Basic
 import ParserCombinator
 import qualified Derp.Core as T
+
+lex = lexComments ";"
+parse = lex .> assertParse prog
 
 term :: Parser T.Term
 term = app <|> v <|> p <|> b <|> n <|> str

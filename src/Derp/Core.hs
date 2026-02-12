@@ -199,13 +199,13 @@ altIter n ts0 f v = trace ("STEP: " <> show n) $ out
 applyRules :: [Rule] -> Tuples -> Set Tuple
 applyRules rules ts = mconcatMap takeThunk $ mconcat $ map (\r -> evalRule r ts mempty) rules
 
-iterRules allRules = result
+iterRules initial allRules = result
   where
     (start, rest) = partition unitBody allRules
     -- (negative, positive) = partition hasNegation rest
     unitBody (Rule (Closure _ e) _) = immediate e
     -- hasNegation (Rule (Closure _ e) _) = length (findNegations e) > 0
-    ts0 = applyRules start mempty
+    ts0 = initial <> applyRules start mempty
     f :: [Rule] -> Tuple -> Tuples -> Tuples -> [Thunk]
     f rules t old check = mconcat $ map (\r -> stepRule r t old check) rules
     result = altIter 10 ts0 (f rest) mempty

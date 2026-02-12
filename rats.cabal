@@ -66,10 +66,11 @@ executable rats
     other-modules:
       Basic
       , ParserCombinator
-      , Types
       , MMap
-      , Parser
       , Binding
+      , Types
+      , Compile
+      , Parser
       , Derp.Types, Derp.Core, Derp.Parse
       , GenSouffle, Derp.Gen
       , Server

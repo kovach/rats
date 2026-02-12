@@ -11,7 +11,7 @@ import qualified Data.Set as Set
 import Data.Map (Map)
 import qualified Data.Map as Map
 import qualified MMap as MMap
-import MMap (MMap(..))
+import MMap (MMap)
 
 class PP a where
   pp  :: a -> String
@@ -33,23 +33,6 @@ instance PP Char where
 
 --instance (PP a, Traversable f) => PP (f a) where
 --  pp xs = "[" <> intercalate ", " (map pp $ traverse (\a -> [a]) xs) <> "]"
-
-pprint :: PP a => a -> IO ()
-pprint = putStrLn . pp
-
--- PP string utils
-pwrap x = "(" <> x <> ")"
-capitalize = map toUpper
-bwrap x = "[" <> x <> "]"
-spwrap x = " " <> x <> " "
-commas = intercalate ", "
-spaces = intercalate " "
-args = pwrap . intercalate ", "
-
-assert a b | a == b = putStrLn "ok"
-assert a b = error $ "not-equal:\n" <> pp a <> "\n\n" <> pp b
-
-mconcatMap f = mconcat . map f
 
 class Monoid b => Collection' b where
   none :: b
@@ -110,3 +93,22 @@ instance (Ord k, Collection v c) => Collection (k, v) (MMap k c) where
     (v,c') <- pick c
     pure ((k,v), m' <> MMap.singleton k c')
   member (k, v) m = v `member` MMap.lookup k m
+
+pprint :: PP a => a -> IO ()
+pprint = putStrLn . pp
+
+-- PP string utils
+pwrap x = "(" <> x <> ")"
+capitalize = map toUpper
+bwrap x = "[" <> x <> "]"
+spwrap x = " " <> x <> " "
+commas = intercalate ", "
+spaces = intercalate " "
+args = pwrap . intercalate ", "
+
+assert a b | a == b = putStrLn "ok"
+assert a b = error $ "not-equal:\n" <> pp a <> "\n\n" <> pp b
+
+mconcatMap f = mconcat . map f
+
+(.>) = flip (.)

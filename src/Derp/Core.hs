@@ -90,6 +90,18 @@ evalBuiltin b "range" [_, t, TermNum lo, TermNum hi] = do
   case B.unify b t (TermNum i) of
     Just b' -> pure b'
     _ -> []
+
+evalBuiltin bd "lt" [a, b] = chk (a', b')
+  where
+    sub = subTerm $ bind bd
+    a' = sub a
+    b' = sub b
+    chk = \case
+      (_, TermApp "z" []) -> []
+      (TermApp "z" [], _) -> [bd]
+      (TermApp "s" [t], TermApp "s" [t']) -> chk (t,t')
+      p -> error $ pp p <> "\n" <> show p
+
 evalBuiltin _ op as = error $ "unimplemented: " <> op <> args (map pp as)
 
 eval :: CE -> Tuples -> Tuples -> [Binding]

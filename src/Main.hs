@@ -397,7 +397,8 @@ main2' input = do
   pure out'
 
 main2 = do
-  input <- readFile "test.derp"
+  --input <- readFile "test.derp"
+  input <- readFile "layout.derp"
   main2' input
 
 main3 = do
@@ -405,5 +406,5 @@ main3 = do
   main2' str
 
 main = do
-  tuples <- main3
-  runServer tuples
+  tuples <- main2
+  pure ()

@@ -1,10 +1,13 @@
 # 26/02/12
+## server
+  - 9d0e7fa96
+  - watch input files, compose hs/rs operations, better rendering.
+
 ## fix allocations
   - see [plan](plans/2.md)
   - also switched to mutable binding usage pattern
 
 ## automatic port derp implementation to rust:
-
   - 13b6110 [CLAUDE,UNREVIEWED] used claude to mostly automatically port Derp to rust. performance is still not significantly better; need to improve ownership structure
   - see [plan](plans/1.md)
   - some remaining issues:

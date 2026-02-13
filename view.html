@@ -6,17 +6,20 @@
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body { background: #1e1e2e; color: #cdd6f4; font-family: 'Fira Mono', 'Consolas', monospace; font-size: 14px; padding: 24px; }
-  h1 { font-size: 18px; margin-bottom: 16px; color: #89b4fa; }
+  h1 { font-size: 18px; margin-bottom: 16px; color: #89b4fa; cursor: pointer; user-select: none; }
   h2 { font-size: 15px; margin: 20px 0 8px; color: #a6e3a1; border-bottom: 1px solid #313244; padding-bottom: 4px; cursor: pointer; user-select: none; }
   table { border-collapse: collapse; margin-bottom: 12px; }
   th, td { text-align: left; padding: 3px 12px 3px 0; }
   th { color: #9399b2; font-weight: normal; }
   td { color: #cdd6f4; }
   .status { color: #9399b2; font-style: italic; }
+  tr.tuple-same td { color: #f9e2af; }
+  tr.tuple-new td { color: #a6e3a1; }
+  tr.tuple-old td { color: #f38ba8; }
 </style>
 </head>
 <body>
-<h1>Derp — Tuples</h1>
+<h1 id="header" onclick="collapseAll()">Derp</h1>
 <div id="status" class="status">Connecting…</div>
 <div id="content"></div>
 <script>
@@ -35,33 +38,104 @@ function renderTerm(t) {
 }
 var collapsed = {};
 var latestData = null;
-function isCollapsed(pred, data) {
-  if (!(pred in collapsed)) collapsed[pred] = data[pred].length > 25;
+var prevData = null;
+function tupleKey(tuple) {
+  return JSON.stringify(tuple, function(key, val) {
+    if (val && typeof val === 'object' && !Array.isArray(val)) {
+      var sorted = {};
+      Object.keys(val).sort().forEach(function(k) { sorted[k] = val[k]; });
+      return sorted;
+    }
+    return val;
+  });
+}
+function computeDiff(oldData, newData) {
+  var diff = {};
+  var allPreds = {};
+  if (oldData) for (var p in oldData) allPreds[p] = true;
+  if (newData) for (var p in newData) allPreds[p] = true;
+  for (var pred in allPreds) {
+    var oldTuples = (oldData && oldData[pred]) || [];
+    var newTuples = (newData && newData[pred]) || [];
+    var oldSet = {};
+    for (var i = 0; i < oldTuples.length; i++) oldSet[tupleKey(oldTuples[i])] = true;
+    var newSet = {};
+    for (var i = 0; i < newTuples.length; i++) newSet[tupleKey(newTuples[i])] = true;
+    var same = [], added = [], removed = [];
+    for (var i = 0; i < newTuples.length; i++) {
+      var k = tupleKey(newTuples[i]);
+      if (oldSet[k]) same.push(newTuples[i]);
+      else added.push(newTuples[i]);
+    }
+    for (var i = 0; i < oldTuples.length; i++) {
+      var k = tupleKey(oldTuples[i]);
+      if (!newSet[k]) removed.push(oldTuples[i]);
+    }
+    diff[pred] = { same: same, added: added, removed: removed };
+  }
+  console.log('old: ', oldSet);
+  console.log('new: ', newSet);
+  return diff;
+}
+function isCollapsed(pred, rowCount) {
+  if (!(pred in collapsed)) collapsed[pred] = rowCount > 25;
   return collapsed[pred];
+}
+function collapseAll() {
+  if (!latestData) return;
+  var preds = Object.keys(latestData);
+  for (var i = 0; i < preds.length; i++) collapsed[preds[i]] = true;
+  render(latestData, false);
 }
 function togglePred(pred) {
   collapsed[pred] = !collapsed[pred];
-  render(latestData);
+  render(latestData, false);
 }
-function render(data) {
+function render(data, isNewMessage) {
   latestData = data;
+  var diff = computeDiff(prevData, data);
+  if (isNewMessage) prevData = data;
+  var preds = Object.keys(diff).sort();
+  // Sort changed relations to the top
+  var changed = [], unchanged = [];
+  for (var i = 0; i < preds.length; i++) {
+    var d = diff[preds[i]];
+    if (d.added.length > 0 || d.removed.length > 0) changed.push(preds[i]);
+    else unchanged.push(preds[i]);
+  }
+  preds = changed.concat(unchanged);
+  var total = 0;
+  for (var i = 0; i < preds.length; i++) {
+    var d = diff[preds[i]];
+    total += d.same.length + d.added.length;
+  }
+  document.getElementById('header').textContent = 'Derp (' + total + ')';
   var html = '';
-  var preds = Object.keys(data).sort();
   for (var i = 0; i < preds.length; i++) {
     var pred = preds[i];
-    var rows = data[pred];
-    var hide = isCollapsed(pred, data);
+    var d = diff[pred];
+    var currentCount = d.same.length + d.added.length;
+    var displayRows = d.same.length + d.added.length + d.removed.length;
+    var hide = isCollapsed(pred, displayRows);
     var arrow = hide ? '&#9654;' : '&#9660;';
-    html += '<h2 onclick="togglePred(\'' + pred + '\')">' + arrow + ' ' + pred + ' (' + rows.length + ')</h2>';
+    html += '<h2 onclick="togglePred(\'' + pred + '\')">' + arrow + ' ' + pred + ' (' + currentCount + ')</h2>';
     if (!hide) {
       html += '<table>';
-      for (var j = 0; j < rows.length; j++) {
-        html += '<tr>';
-        var tuple = rows[j];
-        for (var k = 0; k < tuple.length; k++) {
-          html += '<td>' + renderTerm(tuple[k]) + '</td>';
+      var groups = [
+        { rows: d.same, cls: 'tuple-same' },
+        { rows: d.added, cls: 'tuple-new' },
+        { rows: d.removed, cls: 'tuple-old' }
+      ];
+      for (var g = 0; g < groups.length; g++) {
+        var rows = groups[g].rows, cls = groups[g].cls;
+        for (var j = 0; j < rows.length; j++) {
+          html += '<tr class="' + cls + '">';
+          var tuple = rows[j];
+          for (var k = 0; k < tuple.length; k++) {
+            html += '<td>' + renderTerm(tuple[k]) + '</td>';
+          }
+          html += '</tr>';
         }
-        html += '</tr>';
       }
       html += '</table>';
     }
@@ -72,7 +146,7 @@ var ws = new WebSocket('ws://' + location.host + '/');
 ws.onopen = function() { document.getElementById('status').textContent = 'Connected'; };
 ws.onmessage = function(e) {
   document.getElementById('status').textContent = '';
-  render(JSON.parse(e.data));
+  render(JSON.parse(e.data), true);
 };
 ws.onclose = function() { document.getElementById('status').textContent = 'Disconnected'; };
 ws.onerror = function() { document.getElementById('status').textContent = 'Error'; };

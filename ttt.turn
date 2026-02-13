@@ -1,21 +1,15 @@
 -- Setup --
-setup: !setup; !turn ~ !player o.
+main: !setup; !turn ~ !player o.
 
-?setup / (
+setup: ?setup / (
   !num s(s(z())),
   !other o x,
   !other x o
 ).
 
-
-?num s(X) ~ !num X.
-?num X ~ !row X ~ !col X.
-?row A ~ ?col B ~ !cell !C.
-
-exit -- perf issue
-
-?row A , ?col B / !cell !C.
-?row A ~ ?col B ~ !cell !C ~ !cell/row !C A ~ !cell/col !C B.
+?setup / ( ?num s(X) ~ !num X ).
+?setup / ( ?num X | !row X | !col X ).
+?setup / ( ?row A | ?col B | !cell !C | !cell/row !C A | !cell/col !C B ).
 
 !move a there; !move b there; !move a here; !f.
 

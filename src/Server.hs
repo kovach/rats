@@ -64,17 +64,18 @@ runServer = do
   chan <- newBroadcastTChanIO
   _ <- forkIO $ watchAndRun chan
   putStrLn $ "Starting server on http://localhost:" <> show port
-  html <- LBS.readFile "view.html"
-  Warp.run port (app chan html)
+  Warp.run port (app chan)
 
-app :: TChan TL.Text -> LBS.ByteString -> Wai.Application
-app chan html = WaiWS.websocketsOr WS.defaultConnectionOptions (wsApp chan) (httpApp html)
+app :: TChan TL.Text -> Wai.Application
+app chan = WaiWS.websocketsOr WS.defaultConnectionOptions (wsApp chan) httpApp
 
-httpApp :: LBS.ByteString -> Wai.Application
-httpApp html req respond =
+httpApp :: Wai.Application
+httpApp req respond =
   case Wai.rawPathInfo req of
-    "/" -> respond $ Wai.responseLBS status200
-            [("Content-Type", "text/html; charset=utf-8")] html
+    "/" -> do
+      html <- LBS.readFile "view.html"
+      respond $ Wai.responseLBS status200
+        [("Content-Type", "text/html; charset=utf-8")] html
     _   -> respond $ Wai.responseLBS status404
             [("Content-Type", "text/plain")] "404 Not Found"
 

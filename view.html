@@ -91,10 +91,13 @@ function togglePred(pred) {
   collapsed[pred] = !collapsed[pred];
   render(latestData, false);
 }
-function render(data, isNewMessage) {
+function updateData(data) {
+  prevData = latestData;
   latestData = data;
-  var diff = computeDiff(prevData, data);
-  if (isNewMessage) prevData = data;
+  render();
+}
+function render() {
+  var diff = computeDiff(prevData, latestData);
   var preds = Object.keys(diff).sort();
   // Sort changed relations to the top
   var changed = [], unchanged = [];
@@ -146,7 +149,7 @@ var ws = new WebSocket('ws://' + location.host + '/');
 ws.onopen = function() { document.getElementById('status').textContent = 'Connected'; };
 ws.onmessage = function(e) {
   document.getElementById('status').textContent = '';
-  render(JSON.parse(e.data), true);
+  updateData(JSON.parse(e.data));
 };
 ws.onclose = function() { document.getElementById('status').textContent = 'Disconnected'; };
 ws.onerror = function() { document.getElementById('status').textContent = 'Error'; };

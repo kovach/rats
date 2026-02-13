@@ -60,7 +60,7 @@ fn main() {
     } else {
         let initial: HashSet<types::Tuple> = HashSet::new();
         let result = core::iter_rules(initial, &rules, &intern);
-        println!("{}", result.pp(&intern));
+        println!("{}", result.to_json(&intern));
         eprintln!("{} tuples", result.size());
     }
 }

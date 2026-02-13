@@ -3,7 +3,7 @@
 {-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE ConstraintKinds #-}
-module Compile (main2, main3) where
+module Compile (main1, main2, main3) where
 
 import Prelude hiding (pred, exp, take)
 import Control.Monad.Writer

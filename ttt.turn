@@ -2,7 +2,7 @@
 setup: !setup; !turn ~ !player o.
 
 ?setup / (
-  !num s(s(s(z()))),
+  !num s(s(z())),
   !other o x,
   !other x o
 ).
@@ -10,6 +10,7 @@ setup: !setup; !turn ~ !player o.
 
 ?num s(X) ~ !num X.
 ?num X ~ !row X ~ !col X.
+?row A ~ ?col B ~ !cell !C.
 
 exit -- perf issue
 

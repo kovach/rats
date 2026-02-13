@@ -4,6 +4,21 @@ use smallvec::SmallVec;
 
 use crate::sym::{Sym, Interner};
 
+fn json_escape(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '"' => out.push_str(r#"\""#),
+            '\\' => out.push_str(r"\\"),
+            '\n' => out.push_str(r"\n"),
+            '\r' => out.push_str(r"\r"),
+            '\t' => out.push_str(r"\t"),
+            c => out.push(c),
+        }
+    }
+    out
+}
+
 // -- Term ---------------------------------------------------------------------
 
 pub type ATerm = Rc<Term>;
@@ -38,6 +53,20 @@ impl Term {
                 format!("{}({})", i.resolve(*name), arg_strs.join(", "))
             }
             Term::Str(s) => format!("\"{}\"", i.resolve(*s)),
+        }
+    }
+
+    pub fn to_json(&self, i: &Interner) -> String {
+        match self {
+            Term::Var(s) => format!(r#"{{"tag":"var","name":"{}"}}"#, json_escape(i.resolve(*s))),
+            Term::Pred(s) => format!(r#"{{"tag":"pred","name":"{}"}}"#, json_escape(i.resolve(*s))),
+            Term::Num(n) => format!(r#"{{"tag":"num","value":{}}}"#, n),
+            Term::Blank => r#"{"tag":"blank"}"#.to_owned(),
+            Term::App(name, args) => {
+                let arg_strs: Vec<String> = args.iter().map(|t| t.to_json(i)).collect();
+                format!(r#"{{"tag":"app","name":"{}","args":[{}]}}"#, json_escape(i.resolve(*name)), arg_strs.join(","))
+            }
+            Term::Str(s) => format!(r#"{{"tag":"string","value":"{}"}}"#, json_escape(i.resolve(*s))),
         }
     }
 }
@@ -148,6 +177,22 @@ impl Tuples {
             }
         }
         lines.join("\n")
+    }
+
+    pub fn to_json(&self, i: &Interner) -> String {
+        let mut entries: Vec<String> = Vec::new();
+        let mut preds: Vec<_> = self.relations.iter().collect();
+        preds.sort_by_key(|(p, _)| i.resolve(**p));
+        for (pred, tuples) in preds {
+            let mut sorted_tuples: Vec<_> = tuples.iter().collect();
+            sorted_tuples.sort();
+            let tuple_strs: Vec<String> = sorted_tuples.iter().map(|t| {
+                let terms: Vec<String> = t.iter().map(|term| term.to_json(i)).collect();
+                format!("[{}]", terms.join(","))
+            }).collect();
+            entries.push(format!(r#""{}": [{}]"#, json_escape(i.resolve(*pred)), tuple_strs.join(",")));
+        }
+        format!("{{{}}}", entries.join(","))
     }
 }
 

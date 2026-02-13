@@ -1,5 +1,7 @@
 eq A B -- le A B.
 eq B A -- le A B.
+eq A B -- eq B A.
+eq A B, eq B C -- eq A C.
 lt A B -- le A B.
 le A B, le B C -- le A C.
 le A B, lt B C -- lt A C.

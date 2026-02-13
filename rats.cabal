@@ -92,7 +92,10 @@ executable rats
                       websockets,
                       aeson,
                       http-types,
-                      bytestring
+                      bytestring,
+                      process,
+                      fsnotify,
+                      filepath
 
 
     -- Directories containing source files.

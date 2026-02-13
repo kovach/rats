@@ -28,5 +28,5 @@ import Server (runServer)
 import Compile
 
 main = do
-  tuples <- main3
-  pure ()
+  -- tuples <- main3
+  runServer

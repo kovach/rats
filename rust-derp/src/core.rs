@@ -1,61 +1,61 @@
 use std::collections::HashSet;
-use std::sync::Arc;
 
 use crate::types::*;
 
 // -- Unification --------------------------------------------------------------
 
-/// Unify a pattern term against a value term within a binding context.
-/// Returns None on failure.
-pub fn unify_term(b: &Binding, pat: &Term, val: &Term) -> Option<Binding> {
-    match (pat, val) {
-        (Term::Blank, _) | (_, Term::Blank) => Some(b.clone()),
-        (Term::Var(var), v) => b.try_extend(*var, v),
+/// Unify a pattern term against a value term, consuming the binding.
+/// Returns None on failure, or the (possibly extended) binding on success.
+pub fn unify_term(b: &mut Binding, pat: &ATerm, val: &ATerm) -> bool {
+    match (pat.as_ref(), val.as_ref()) {
+        (Term::Blank, _) | (_, Term::Blank) => true,
+        (Term::Var(var), _) => b.try_extend(*var, val),
         (Term::Pred(_), _) => {
-            if pat == val { Some(b.clone()) } else { None }
+            pat == val
         }
         (Term::Num(_), _) => {
-            if pat == val { Some(b.clone()) } else { None }
+            pat == val
         }
         (Term::Str(_), _) => {
-            if pat == val { Some(b.clone()) } else { None }
+            pat == val
         }
-        (Term::App(cons, ts), Term::App(cons2, ts2)) => {
-            if cons != cons2 || ts.len() != ts2.len() {
-                return None;
+        (Term::App(cons1, ts1), Term::App(cons2, ts2)) => {
+            if cons1 != cons2 {
+                return false
             }
-            unify_tuples(b, ts, ts2)
+            unify_tuples(b, ts1, ts2)
         }
-        (Term::App(..), _) => None,
+        (Term::App(..), _) => false,
     }
 }
 
-/// Unify two tuples element-wise.
-pub fn unify_tuples(b: &Binding, ts1: &[Term], ts2: &[Term]) -> Option<Binding> {
+/// Unify two slices of ATerms element-wise, consuming the binding.
+pub fn unify_tuples(b: &mut Binding, ts1: &[ATerm], ts2: &[ATerm]) -> bool {
     if ts1.len() != ts2.len() {
-        return None;
+        return false;
     }
-    let mut ctx = b.clone();
     for (t, v) in ts1.iter().zip(ts2.iter()) {
-        ctx = unify_term(&ctx, t, v)?;
+        if !unify_term(b, t, v) { return false; }
     }
-    Some(ctx)
+    true
 }
 
 // -- Substitution -------------------------------------------------------------
 
-pub fn sub_term(ctx: &Binding, t: &Term) -> Term {
-    match t {
-        Term::Var(n) => match ctx.lookup(*n) {
-            Some(v) => v.clone(),
-            None => panic!("unbound variable"),
-        },
-        Term::App(cons, ts) => {
-            let ts2: Arc<[Term]> = ts.iter().map(|t| sub_term(ctx, t)).collect();
-            Term::App(*cons, ts2)
+pub fn sub_term(ctx: &Binding, t: &ATerm) -> ATerm {
+    match t.as_ref() {
+        Term::Var(n) => ctx.lookup(*n).expect("unbound variable").clone(),
+        Term::App(cons, args) => {
+            let new_args: Vec<ATerm> = args.iter().map(|a| sub_term(ctx, a)).collect();
+            // If nothing changed, reuse original term (zero allocation)
+            if new_args.iter().zip(args.iter()).all(|(a, b)| aterm_ptr_eq(a, b)) {
+                t.clone()
+            } else {
+                aapp(*cons, new_args)
+            }
         }
         Term::Blank => panic!("cannot substitute blank"),
-        other => other.clone(),
+        _ => t.clone(),
     }
 }
 
@@ -104,9 +104,11 @@ pub fn specialize(cl: &Closure, tuple: &Tuple) -> Vec<Closure> {
     match &cl.val {
         Expr::Unit | Expr::Bind(..) | Expr::NegAtom(..) => vec![],
         Expr::Atom(pat) => {
-            match unify_tuples(&cl.ctx, pat, tuple) {
-                Some(b2) => vec![Closure { ctx: b2, val: Expr::Unit }],
-                None => vec![],
+            let mut c = cl.ctx.clone();
+            if unify_tuples(&mut c, pat, tuple) {
+                vec![Closure { ctx: c, val: Expr::Unit }]
+            } else {
+                vec![]
             }
         }
         Expr::Join(a, b) => {
@@ -155,38 +157,34 @@ pub fn eval(cl: &Closure, tuples: &Tuples, check: &Tuples, intern: &crate::sym::
         Expr::Unit => vec![cl.ctx.clone()],
         Expr::Bind(x, y) => {
             let y_sub = sub_term(&cl.ctx, y);
-            match unify_term(&cl.ctx, x, &y_sub) {
-                Some(b) => vec![b],
-                None => vec![],
+            let mut b = cl.ctx.clone();
+            if unify_term(&mut b, x, &y_sub) {
+                vec![b]
+            } else {
+                vec![]
             }
         }
         Expr::Atom(pat) => {
             if pat.is_empty() {
                 panic!("empty atom in eval");
             }
-            match &pat[0] {
+            match pat[0].as_ref() {
                 Term::Pred(p) => {
-                    let pred_str = intern.resolve(*p);
+                    let p = *p;
+                    let pred_str = intern.resolve(p);
                     if pred_str.starts_with('#') {
-                        // Special/builtin atom: strip '#' prefix to get op name
                         let op_name = &pred_str[1..];
-                        // We need the Sym for the op name without '#'
-                        // Since the interner is immutable here, look up using the full pred
-                        // Actually let's just pass the sym and handle in eval_builtin
-                        // The Haskell uses pattern SpecialAtom which strips '#'
-                        // We need a mutable interner or pre-intern. Let's use the full string.
-                        // For now, just use the resolved string directly.
                         return eval_builtin_str(&cl.ctx, op_name, &pat[1..], intern);
                     }
                     let vs = &pat[1..];
                     let mut results = Vec::new();
-                    for stored_tuple in tuples.lookup(*p) {
-                        for sp in specialize(
-                            &Closure { ctx: cl.ctx.clone(), val: Expr::Atom(vs.into()) },
-                            stored_tuple,
-                        ) {
-                            results.push(sp.ctx);
+                    let mut c = cl.ctx.clone();
+                    for stored_tuple in tuples.lookup(p) {
+                        c.push();
+                        if unify_tuples(&mut c, vs, stored_tuple) {
+                            results.push(c.clone());
                         }
+                        c.pop();
                     }
                     results
                 }
@@ -195,7 +193,7 @@ pub fn eval(cl: &Closure, tuples: &Tuples, check: &Tuples, intern: &crate::sym::
         }
         Expr::NegAtom(at) => {
             let substituted = subst(&cl.ctx, at);
-            if substituted[0] == Term::Blank {
+            if matches!(substituted[0].as_ref(), Term::Blank) {
                 panic!("negatom substituted to blank pred");
             }
             if check.contains_tuple(&substituted) {
@@ -216,17 +214,19 @@ pub fn eval(cl: &Closure, tuples: &Tuples, check: &Tuples, intern: &crate::sym::
     }
 }
 
-fn eval_builtin_str(b: &Binding, op: &str, args: &[Term], intern: &crate::sym::Interner) -> Vec<Binding> {
+fn eval_builtin_str(b: &Binding, op: &str, args: &[ATerm], intern: &crate::sym::Interner) -> Vec<Binding> {
     match op {
         "range" => {
             // evalBuiltin b "range" [_, t, TermNum lo, TermNum hi]
             if args.len() != 4 { panic!("range expects 4 args, got {}", args.len()); }
             let t = &args[1];
-            let lo = match &args[2] { Term::Num(n) => *n, _ => panic!("range: lo must be num") };
-            let hi = match &args[3] { Term::Num(n) => *n, _ => panic!("range: hi must be num") };
+            let lo = match args[2].as_ref() { Term::Num(n) => *n, _ => panic!("range: lo must be num") };
+            let hi = match args[3].as_ref() { Term::Num(n) => *n, _ => panic!("range: hi must be num") };
             let mut results = Vec::new();
             for i in lo..=hi {
-                if let Some(b2) = unify_term(b, t, &Term::Num(i)) {
+                let num = anum(i);
+                let mut b2 = b.clone();
+                if unify_term(&mut b2, t, &num) {
                     results.push(b2);
                 }
             }
@@ -236,8 +236,8 @@ fn eval_builtin_str(b: &Binding, op: &str, args: &[Term], intern: &crate::sym::I
             if args.len() != 2 { panic!("lt expects 2 args"); }
             let a = sub_term(b, &args[0]);
             let bterm = sub_term(b, &args[1]);
-            fn chk_str(bd: &Binding, a: &Term, bt: &Term, intern: &crate::sym::Interner) -> Vec<Binding> {
-                match (a, bt) {
+            fn chk_str(bd: &Binding, a: &ATerm, bt: &ATerm, intern: &crate::sym::Interner) -> Vec<Binding> {
+                match (a.as_ref(), bt.as_ref()) {
                     (_, Term::App(cons, _)) if intern.resolve(*cons) == "z" => vec![],
                     (Term::App(cons, _), _) if intern.resolve(*cons) == "z" => vec![bd.clone()],
                     (Term::App(sc, ts), Term::App(sc2, ts2))
@@ -296,8 +296,8 @@ pub fn iter(
     db: &mut Tuples,
     base: &Tuples,
     check: &Tuples,
-) -> HashSet<Tuple> {
-    let mut changed: HashSet<Tuple> = HashSet::new();
+) -> bool {
+    let mut changed = false;
     // Mirror the Haskell Set worklist semantics: track all tuples ever
     // enqueued so we never enqueue the same tuple twice.
     let mut enqueued: HashSet<Tuple> = worklist.iter().cloned().collect();
@@ -310,7 +310,7 @@ pub fn iter(
                     enqueued.insert(tuple.clone());
                     worklist.push_back(tuple.clone());
                     if !base.contains_tuple(tuple) {
-                        changed.insert(tuple.clone());
+                        changed = true;
                     }
                 }
             }
@@ -345,9 +345,9 @@ pub fn alt_iter(
     let mut db2 = Tuples::new();
     let gen2 = iter(f, &mut wl2, &mut db2, v, &db1);
 
-    if gen1.is_empty() {
+    if !gen1 {
         db1
-    } else if gen2.is_empty() {
+    } else if !gen2 {
         db2
     } else {
         alt_iter(gas - 1, ts0, f, &db2)

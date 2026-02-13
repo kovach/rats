@@ -1,8 +1,12 @@
 # 26/02/12
-automatic port derp implementation to rust:
+## fix allocations
+  - see [plan](plans/2.md)
+  - also switched to mutable binding usage pattern
+
+## automatic port derp implementation to rust:
 
   - 13b6110 [CLAUDE,UNREVIEWED] used claude to mostly automatically port Derp to rust. performance is still not significantly better; need to improve ownership structure
-  - see [plan](rust-derp/PLAN.md)
+  - see [plan](plans/1.md)
   - some remaining issues:
     - [scott] review
     - parser should use combinators

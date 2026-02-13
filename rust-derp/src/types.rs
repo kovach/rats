@@ -1,10 +1,20 @@
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::sync::Arc;
+use std::rc::Rc;
 use smallvec::SmallVec;
 
 use crate::sym::{Sym, Interner};
 
 // -- Term ---------------------------------------------------------------------
+
+pub type ATerm = Rc<Term>;
+
+pub fn avar(s: Sym) -> ATerm { Rc::new(Term::Var(s)) }
+pub fn apred(s: Sym) -> ATerm { Rc::new(Term::Pred(s)) }
+pub fn anum(n: i32) -> ATerm { Rc::new(Term::Num(n)) }
+pub fn ablank() -> ATerm { Rc::new(Term::Blank) }
+pub fn astr(s: Sym) -> ATerm { Rc::new(Term::Str(s)) }
+pub fn aapp(cons: Sym, args: Vec<ATerm>) -> ATerm { Rc::new(Term::App(cons, args)) }
+pub fn aterm_ptr_eq(a: &ATerm, b: &ATerm) -> bool { Rc::ptr_eq(a, b) }
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub enum Term {
@@ -12,7 +22,7 @@ pub enum Term {
     Pred(Sym),
     Num(i32),
     Blank,
-    App(Sym, Arc<[Term]>),
+    App(Sym, Vec<ATerm>),
     Str(Sym),
 }
 
@@ -34,7 +44,7 @@ impl Term {
 
 // -- Tuple --------------------------------------------------------------------
 
-pub type Tuple = SmallVec<[Term; 6]>;
+pub type Tuple = SmallVec<[ATerm; 6]>;
 
 pub fn pp_tuple(t: &Tuple, i: &Interner) -> String {
     t.iter().map(|term| term.pp(i)).collect::<Vec<_>>().join(" ")
@@ -56,7 +66,7 @@ impl Tuples {
 
     /// Insert a tuple (pred : rest). Returns true if the tuple was new.
     pub fn insert_tuple(&mut self, tuple: &Tuple) -> bool {
-        let pred = match &tuple[0] {
+        let pred = match tuple[0].as_ref() {
             Term::Pred(p) => *p,
             _ => panic!("tuple must start with a Pred"),
         };
@@ -76,7 +86,7 @@ impl Tuples {
     }
 
     pub fn contains_tuple(&self, tuple: &Tuple) -> bool {
-        let pred = match &tuple[0] {
+        let pred = match tuple[0].as_ref() {
             Term::Pred(p) => *p,
             _ => panic!("tuple must start with a Pred"),
         };
@@ -132,7 +142,7 @@ impl Tuples {
             sorted_tuples.sort();
             for t in sorted_tuples {
                 let mut full: Tuple = SmallVec::new();
-                full.push(Term::Pred(*pred));
+                full.push(apred(*pred));
                 full.extend(t.iter().cloned());
                 lines.push(pp_tuple(&full, i));
             }
@@ -147,68 +157,61 @@ pub type Worklist = VecDeque<Tuple>;
 
 // -- Binding ------------------------------------------------------------------
 
-/// A sorted association list from Sym -> Term, kept sorted by Sym for
+/// A sorted association list from Sym -> ATerm, kept sorted by Sym for
 /// binary-search lookup. Inline for up to 8 entries.
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub struct Binding {
-    pub entries: SmallVec<[(Sym, Term); 8]>,
+    pub entries: SmallVec<[(Sym, ATerm); 8]>,
+    pub stack: SmallVec<[usize; 8]>,
 }
 
 impl Binding {
     pub fn new() -> Self {
         Binding {
             entries: SmallVec::new(),
+            stack: SmallVec::new(),
         }
     }
 
-    pub fn from_list(pairs: &[(Sym, Term)]) -> Self {
-        let mut b = Binding::new();
-        for (k, v) in pairs {
-            b.insert_sorted(*k, v.clone());
+    fn insert(&mut self, key: Sym, val: ATerm) {
+        self.entries.push((key, val));
+    }
+
+    pub fn push(&mut self) {
+        self.stack.push(self.entries.len());
+    }
+    pub fn pop(&mut self) {
+        match self.stack.pop() {
+            Some(k) => self.entries.truncate(k),
+            None => (),
         }
-        b
     }
 
-    fn insert_sorted(&mut self, key: Sym, val: Term) {
-        match self.entries.binary_search_by_key(&key, |(k, _)| *k) {
-            Ok(idx) => self.entries[idx] = (key, val),
-            Err(idx) => self.entries.insert(idx, (key, val)),
-        }
-    }
-
-    pub fn lookup(&self, key: Sym) -> Option<&Term> {
-        self.entries
-            .binary_search_by_key(&key, |(k, _)| *k)
-            .ok()
-            .map(|idx| &self.entries[idx].1)
-    }
-
-    pub fn extend(&self, key: Sym, val: Term) -> Binding {
-        let mut b = self.clone();
-        b.insert_sorted(key, val);
-        b
-    }
-
-    /// Try to extend: if key already exists, check val == existing.
-    pub fn try_extend(&self, key: Sym, val: &Term) -> Option<Binding> {
-        if let Some(existing) = self.lookup(key) {
-            if existing == val {
-                Some(self.clone())
-            } else {
-                None
+    pub fn lookup(&self, key: Sym) -> Option<&ATerm> {
+        for (k, v) in self.entries.iter().rev() {
+            if *k == key {
+                return Some(v);
             }
-        } else {
-            Some(self.extend(key, val.clone()))
         }
+        None
     }
 
-    /// Merge another binding into this one, failing if any key conflicts.
-    pub fn merge(&self, other: &Binding) -> Option<Binding> {
-        let mut result = self.clone();
-        for (k, v) in &other.entries {
-            result = result.try_extend(*k, v)?;
+    pub fn try_extend(&mut self, key: Sym, val: &ATerm) -> bool {
+        match self.lookup(key) {
+        // match self.entries.binary_search_by_key(&key, |(k, _)| *k) {
+            Some(v) => {
+                if v == val {
+                    true
+                } else {
+                    false
+                }
+            }
+            None => {
+                self.insert(key, val.clone());
+                // self.entries.insert(idx, (key, val.clone()));
+                true
+            }
         }
-        Some(result)
     }
 
     pub fn pp(&self, i: &Interner) -> String {
@@ -226,7 +229,7 @@ impl Binding {
 pub enum Expr {
     Atom(Tuple),
     NegAtom(Tuple),
-    Bind(Term, Term),
+    Bind(ATerm, ATerm),
     Join(Box<Expr>, Box<Expr>),
     Unit,
 }

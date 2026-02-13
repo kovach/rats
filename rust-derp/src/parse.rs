@@ -217,7 +217,7 @@ impl<'a> Parser<'a> {
 
     // -- Term parser ----------------------------------------------------------
 
-    fn term(&mut self) -> PResult<Term> {
+    fn term(&mut self) -> PResult<ATerm> {
         // app <|> v <|> p <|> b <|> n <|> str
         // app = TermApp <$> predicate <*> parens (commaSep term)
         // Try app first (predicate followed by parens), then fall back to pred
@@ -228,12 +228,12 @@ impl<'a> Parser<'a> {
             let saved2 = self.pos;
             if let Ok(args) = self.parens(|p| p.comma_sep(|p| p.term())) {
                 let sym = self.intern.intern(&name);
-                return Ok(Term::App(sym, args.into()));
+                return Ok(aapp(sym, args));
             }
             // It was just a predicate, not an app
             self.pos = saved2;
             let sym = self.intern.intern(&name);
-            return Ok(Term::Pred(sym));
+            return Ok(apred(sym));
         }
         self.pos = saved;
 
@@ -241,7 +241,7 @@ impl<'a> Parser<'a> {
         let saved = self.pos;
         if let Ok(v) = self.variable() {
             let sym = self.intern.intern(&v);
-            return Ok(Term::Var(sym));
+            return Ok(avar(sym));
         }
         self.pos = saved;
 
@@ -256,16 +256,16 @@ impl<'a> Parser<'a> {
                     self.pos = saved;
                     let v = self.variable()?;
                     let sym = self.intern.intern(&v);
-                    return Ok(Term::Var(sym));
+                    return Ok(avar(sym));
                 }
-                _ => return Ok(Term::Blank),
+                _ => return Ok(ablank()),
             }
         }
 
         // Try number
         let saved = self.pos;
         if let Ok(n) = self.nat() {
-            return Ok(Term::Num(n));
+            return Ok(anum(n));
         }
         self.pos = saved;
 
@@ -273,7 +273,7 @@ impl<'a> Parser<'a> {
         let saved = self.pos;
         if let Ok(s) = self.string_lit() {
             let sym = self.intern.intern(&s);
-            return Ok(Term::Str(sym));
+            return Ok(astr(sym));
         }
         self.pos = saved;
 

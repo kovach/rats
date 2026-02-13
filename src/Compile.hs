@@ -389,7 +389,8 @@ main2' input = do
   let rs = DP.parse input -- assertParse prog $ lexComments ";" input
   -- print rs
   let D.Tuples ts = D.iterRules none rs
-      hide :: [String] = ["le", "lt"]
+      hide :: [String] = []
+      --hide :: [String] = ["le", "lt"]
       out' = D.Tuples $ M.filterWithKey (\k _ -> not (k `member` hide)) ts
   putStrLn "\nresult:"
   pprint $ out'

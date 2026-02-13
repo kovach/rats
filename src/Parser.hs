@@ -2,12 +2,13 @@ module Parser where
 
 import Prelude hiding (pred, lex)
 import Data.Maybe
+import Data.List (isPrefixOf)
 
 import Basic
 import ParserCombinator
 import qualified Types as T
 
-lex = lexComments "--" .> lines .> takeWhile (/= "exit") .> unlines
+lex = lexComments "--" .> lines .> takeWhile (not . isPrefixOf "exit") .> unlines
 parse = lex .> assertParse program
 
 pred :: Parser T.Pred
@@ -21,7 +22,7 @@ var = v
     v = T.NegVar <$> variable
 
 term :: Parser T.Term
-term = cv <|> fv <|> v <|> p <|> rand <|> b <|> n
+term = app <|> cv <|> fv <|> v <|> p <|> rand <|> b <|> n
   where
     v = T.TermVar <$> var
     p = T.TermPred <$> pred
@@ -30,6 +31,7 @@ term = cv <|> fv <|> v <|> p <|> rand <|> b <|> n
     rand = pure (T.TermExt "$") <* char '$'
     b = pure T.TermBlank <* char '_'
     n = T.TermNum <$> nat
+    app = T.TermApp <$> predicate <*> parens (commaSep term)
 
 pattern_ :: Parser T.Pattern
 pattern_ = q <|> a <|> k

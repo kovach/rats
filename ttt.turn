@@ -2,11 +2,19 @@
 setup: !setup; !turn ~ !player o.
 
 ?setup / (
-  ?#range I 1 3 | ?#range J 1 3
-  | !cell !C | !row !C I | !col !C J
+  !num s(s(s(z()))),
+  !other o x,
+  !other x o
 ).
 
-?setup / ( !other o x, !other x o ).
+
+?num s(X) ~ !num X.
+?num X ~ !row X ~ !col X.
+
+exit -- perf issue
+
+?row A , ?col B / !cell !C.
+?row A ~ ?col B ~ !cell !C ~ !cell/row !C A ~ !cell/col !C B.
 
 !move a there; !move b there; !move a here; !f.
 

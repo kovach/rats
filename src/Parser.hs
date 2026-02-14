@@ -58,7 +58,8 @@ expr3 = over <|> under <|> same <|> expr2
   where
     over = uncurry T.Over <$> sep2 (char '/') expr2 expr3
     under = uncurry T.Under <$> sep2 (char '\\') expr2 expr3
-    same = (uncurry T.Same <$> sep2 (char '~') expr2 expr3)
+    same = (uncurry T.Same <$> sep2 (char '~') expr2 expr3) -- TODO make binding higher (expr1?). maybe introduce second form for low precedence
+
 expr4 :: Parser T.E
 expr4 = par <|> expr3
   where

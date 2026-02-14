@@ -9,7 +9,7 @@ use crate::types::*;
 pub fn unify_term(b: &mut Binding, pat: &ATerm, val: &ATerm) -> bool {
     match (pat.as_ref(), val.as_ref()) {
         (Term::Blank, _) | (_, Term::Blank) => true,
-        (Term::Var(var), _) => b.try_extend(*var, val),
+        (Term::Var(var), _) => b.try_extend(var.as_sym(), val),
         (Term::Pred(_), _) => {
             pat == val
         }
@@ -44,14 +44,14 @@ pub fn unify_tuples(b: &mut Binding, ts1: &[ATerm], ts2: &[ATerm]) -> bool {
 
 pub fn sub_term(ctx: &Binding, t: &ATerm) -> ATerm {
     match t.as_ref() {
-        Term::Var(n) => ctx.lookup(*n).expect("unbound variable").clone(),
+        Term::Var(n) => ctx.lookup(n.as_sym()).expect("unbound variable").clone(),
         Term::App(cons, args) => {
             let new_args: Vec<ATerm> = args.iter().map(|a| sub_term(ctx, a)).collect();
             // If nothing changed, reuse original term (zero allocation)
             if new_args.iter().zip(args.iter()).all(|(a, b)| aterm_ptr_eq(a, b)) {
                 t.clone()
             } else {
-                aapp(*cons, new_args)
+                aapp(cons.clone(), new_args)
             }
         }
         Term::Blank => panic!("cannot substitute blank"),
@@ -170,8 +170,8 @@ pub fn eval(cl: &Closure, tuples: &Tuples, check: &Tuples, intern: &crate::sym::
             }
             match pat[0].as_ref() {
                 Term::Pred(p) => {
-                    let p = *p;
-                    let pred_str = intern.resolve(p);
+                    let sym = p.as_sym();
+                    let pred_str = intern.resolve(sym);
                     if pred_str.starts_with('#') {
                         let op_name = &pred_str[1..];
                         return eval_builtin_str(&cl.ctx, op_name, &pat[1..], intern);
@@ -179,7 +179,7 @@ pub fn eval(cl: &Closure, tuples: &Tuples, check: &Tuples, intern: &crate::sym::
                     let vs = &pat[1..];
                     let mut results = Vec::new();
                     let mut c = cl.ctx.clone();
-                    for stored_tuple in tuples.lookup(p) {
+                    for stored_tuple in tuples.lookup(sym) {
                         c.push();
                         if unify_tuples(&mut c, vs, stored_tuple) {
                             results.push(c.clone());
@@ -238,10 +238,10 @@ fn eval_builtin_str(b: &Binding, op: &str, args: &[ATerm], intern: &crate::sym::
             let bterm = sub_term(b, &args[1]);
             fn chk_str(bd: &Binding, a: &ATerm, bt: &ATerm, intern: &crate::sym::Interner) -> Vec<Binding> {
                 match (a.as_ref(), bt.as_ref()) {
-                    (_, Term::App(cons, _)) if intern.resolve(*cons) == "z" => vec![],
-                    (Term::App(cons, _), _) if intern.resolve(*cons) == "z" => vec![bd.clone()],
+                    (_, Term::App(cons, _)) if cons.resolve(intern) == "z" => vec![],
+                    (Term::App(cons, _), _) if cons.resolve(intern) == "z" => vec![bd.clone()],
                     (Term::App(sc, ts), Term::App(sc2, ts2))
-                        if intern.resolve(*sc) == "s" && intern.resolve(*sc2) == "s" =>
+                        if sc.resolve(intern) == "s" && sc2.resolve(intern) == "s" =>
                     {
                         chk_str(bd, &ts[0], &ts2[0], intern)
                     }

@@ -228,12 +228,12 @@ impl<'a> Parser<'a> {
             let saved2 = self.pos;
             if let Ok(args) = self.parens(|p| p.comma_sep(|p| p.term())) {
                 let sym = self.intern.intern(&name);
-                return Ok(aapp(sym, args));
+                return Ok(aapp(Name::Sym(sym), args));
             }
             // It was just a predicate, not an app
             self.pos = saved2;
             let sym = self.intern.intern(&name);
-            return Ok(apred(sym));
+            return Ok(apred(Name::Sym(sym)));
         }
         self.pos = saved;
 
@@ -241,7 +241,7 @@ impl<'a> Parser<'a> {
         let saved = self.pos;
         if let Ok(v) = self.variable() {
             let sym = self.intern.intern(&v);
-            return Ok(avar(sym));
+            return Ok(avar(Name::Sym(sym)));
         }
         self.pos = saved;
 
@@ -256,7 +256,7 @@ impl<'a> Parser<'a> {
                     self.pos = saved;
                     let v = self.variable()?;
                     let sym = self.intern.intern(&v);
-                    return Ok(avar(sym));
+                    return Ok(avar(Name::Sym(sym)));
                 }
                 _ => return Ok(ablank()),
             }
@@ -273,7 +273,7 @@ impl<'a> Parser<'a> {
         let saved = self.pos;
         if let Ok(s) = self.string_lit() {
             let sym = self.intern.intern(&s);
-            return Ok(astr(sym));
+            return Ok(astr(Name::Sym(sym)));
         }
         self.pos = saved;
 

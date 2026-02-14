@@ -1,3 +1,7 @@
+# 26/02/14
+## use serde
+  - see [plan](plans/3.md)
+
 # 26/02/12
 ## server
   - 9d0e7fa96

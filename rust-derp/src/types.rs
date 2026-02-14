@@ -1,72 +1,147 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::rc::Rc;
 use smallvec::SmallVec;
+use serde::Serialize;
 
 use crate::sym::{Sym, Interner};
-
-fn json_escape(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    for c in s.chars() {
-        match c {
-            '"' => out.push_str(r#"\""#),
-            '\\' => out.push_str(r"\\"),
-            '\n' => out.push_str(r"\n"),
-            '\r' => out.push_str(r"\r"),
-            '\t' => out.push_str(r"\t"),
-            c => out.push(c),
-        }
-    }
-    out
-}
 
 // -- Term ---------------------------------------------------------------------
 
 pub type ATerm = Rc<Term>;
 
-pub fn avar(s: Sym) -> ATerm { Rc::new(Term::Var(s)) }
-pub fn apred(s: Sym) -> ATerm { Rc::new(Term::Pred(s)) }
+pub fn avar(s: Name) -> ATerm { Rc::new(Term::Var(s)) }
+pub fn apred(s: Name) -> ATerm { Rc::new(Term::Pred(s)) }
 pub fn anum(n: i32) -> ATerm { Rc::new(Term::Num(n)) }
 pub fn ablank() -> ATerm { Rc::new(Term::Blank) }
-pub fn astr(s: Sym) -> ATerm { Rc::new(Term::Str(s)) }
-pub fn aapp(cons: Sym, args: Vec<ATerm>) -> ATerm { Rc::new(Term::App(cons, args)) }
+pub fn astr(s: Name) -> ATerm { Rc::new(Term::Str(s)) }
+pub fn aapp(cons: Name, args: Vec<ATerm>) -> ATerm { Rc::new(Term::App(cons, args)) }
 pub fn aterm_ptr_eq(a: &ATerm, b: &ATerm) -> bool { Rc::ptr_eq(a, b) }
+
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Serialize)]
+#[serde(untagged)]
+pub enum Name {
+    #[serde(skip)]
+    Sym(Sym),
+    Str(String),
+}
+
+impl Name {
+    pub fn resolve<'a>(&'a self, i: &'a Interner) -> &'a str {
+        match self {
+            Name::Sym(s) => i.resolve(*s),
+            Name::Str(s) => s.as_str(),
+        }
+    }
+
+    pub fn as_sym(&self) -> Sym {
+        match self {
+            Name::Sym(s) => *s,
+            Name::Str(_) => panic!("Name::as_sym called on Str"),
+        }
+    }
+}
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub enum Term {
-    Var(Sym),
-    Pred(Sym),
+    Var(Name),
+    Pred(Name),
     Num(i32),
     Blank,
-    App(Sym, Vec<ATerm>),
-    Str(Sym),
+    App(Name, Vec<ATerm>),
+    Str(Name),
+}
+
+impl Serialize for Term {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeMap;
+        match self {
+            Term::Var(name) => {
+                let mut map = serializer.serialize_map(Some(2))?;
+                map.serialize_entry("tag", "var")?;
+                map.serialize_entry("name", name)?;
+                map.end()
+            }
+            Term::Pred(name) => {
+                let mut map = serializer.serialize_map(Some(2))?;
+                map.serialize_entry("tag", "pred")?;
+                map.serialize_entry("name", name)?;
+                map.end()
+            }
+            Term::Num(n) => {
+                let mut map = serializer.serialize_map(Some(2))?;
+                map.serialize_entry("tag", "num")?;
+                map.serialize_entry("value", n)?;
+                map.end()
+            }
+            Term::Blank => {
+                let mut map = serializer.serialize_map(Some(1))?;
+                map.serialize_entry("tag", "blank")?;
+                map.end()
+            }
+            Term::App(name, args) => {
+                let mut map = serializer.serialize_map(Some(3))?;
+                map.serialize_entry("tag", "app")?;
+                map.serialize_entry("name", name)?;
+                map.serialize_entry("args", args)?;
+                map.end()
+            }
+            Term::Str(value) => {
+                let mut map = serializer.serialize_map(Some(2))?;
+                map.serialize_entry("tag", "string")?;
+                map.serialize_entry("value", value)?;
+                map.end()
+            }
+        }
+    }
 }
 
 impl Term {
     pub fn pp(&self, i: &Interner) -> String {
         match self {
-            Term::Var(s) => i.resolve(*s).to_owned(),
-            Term::Pred(s) => i.resolve(*s).to_owned(),
+            Term::Var(s) => s.resolve(i).to_owned(),
+            Term::Pred(s) => s.resolve(i).to_owned(),
             Term::Num(n) => n.to_string(),
             Term::Blank => "_".to_owned(),
             Term::App(name, args) => {
                 let arg_strs: Vec<String> = args.iter().map(|t| t.pp(i)).collect();
-                format!("{}({})", i.resolve(*name), arg_strs.join(", "))
+                format!("{}({})", name.resolve(i), arg_strs.join(", "))
             }
-            Term::Str(s) => format!("\"{}\"", i.resolve(*s)),
+            Term::Str(s) => format!("\"{}\"", s.resolve(i)),
         }
     }
 
-    pub fn to_json(&self, i: &Interner) -> String {
+    /// Resolve all Name::Sym → Name::Str using the interner.
+    pub fn resolve_names(&self, i: &Interner) -> Term {
         match self {
-            Term::Var(s) => format!(r#"{{"tag":"var","name":"{}"}}"#, json_escape(i.resolve(*s))),
-            Term::Pred(s) => format!(r#"{{"tag":"pred","name":"{}"}}"#, json_escape(i.resolve(*s))),
-            Term::Num(n) => format!(r#"{{"tag":"num","value":{}}}"#, n),
-            Term::Blank => r#"{"tag":"blank"}"#.to_owned(),
+            Term::Var(s) => Term::Var(Name::Str(s.resolve(i).to_owned())),
+            Term::Pred(s) => Term::Pred(Name::Str(s.resolve(i).to_owned())),
+            Term::Num(_) | Term::Blank => self.clone(),
             Term::App(name, args) => {
-                let arg_strs: Vec<String> = args.iter().map(|t| t.to_json(i)).collect();
-                format!(r#"{{"tag":"app","name":"{}","args":[{}]}}"#, json_escape(i.resolve(*name)), arg_strs.join(","))
+                let new_args = args.iter().map(|a| Rc::new(a.resolve_names(i))).collect();
+                Term::App(Name::Str(name.resolve(i).to_owned()), new_args)
             }
-            Term::Str(s) => format!(r#"{{"tag":"string","value":"{}"}}"#, json_escape(i.resolve(*s))),
+            Term::Str(s) => Term::Str(Name::Str(s.resolve(i).to_owned())),
+        }
+    }
+
+    /// Intern all Name::Str → Name::Sym using the interner.
+    pub fn intern_names(&self, i: &mut Interner) -> Term {
+        match self {
+            Term::Var(Name::Str(s)) => Term::Var(Name::Sym(i.intern(s))),
+            Term::Var(n @ Name::Sym(_)) => Term::Var(n.clone()),
+            Term::Pred(Name::Str(s)) => Term::Pred(Name::Sym(i.intern(s))),
+            Term::Pred(n @ Name::Sym(_)) => Term::Pred(n.clone()),
+            Term::Num(_) | Term::Blank => self.clone(),
+            Term::App(name, args) => {
+                let new_name = match name {
+                    Name::Str(s) => Name::Sym(i.intern(s)),
+                    n @ Name::Sym(_) => n.clone(),
+                };
+                let new_args = args.iter().map(|a| Rc::new(a.intern_names(i))).collect();
+                Term::App(new_name, new_args)
+            }
+            Term::Str(Name::Str(s)) => Term::Str(Name::Sym(i.intern(s))),
+            Term::Str(n @ Name::Sym(_)) => Term::Str(n.clone()),
         }
     }
 }
@@ -96,7 +171,7 @@ impl Tuples {
     /// Insert a tuple (pred : rest). Returns true if the tuple was new.
     pub fn insert_tuple(&mut self, tuple: &Tuple) -> bool {
         let pred = match tuple[0].as_ref() {
-            Term::Pred(p) => *p,
+            Term::Pred(p) => p.as_sym(),
             _ => panic!("tuple must start with a Pred"),
         };
         let rest: Tuple = tuple[1..].into();
@@ -116,7 +191,7 @@ impl Tuples {
 
     pub fn contains_tuple(&self, tuple: &Tuple) -> bool {
         let pred = match tuple[0].as_ref() {
-            Term::Pred(p) => *p,
+            Term::Pred(p) => p.as_sym(),
             _ => panic!("tuple must start with a Pred"),
         };
         let rest: Tuple = tuple[1..].into();
@@ -171,7 +246,7 @@ impl Tuples {
             sorted_tuples.sort();
             for t in sorted_tuples {
                 let mut full: Tuple = SmallVec::new();
-                full.push(apred(*pred));
+                full.push(apred(Name::Sym(*pred)));
                 full.extend(t.iter().cloned());
                 lines.push(pp_tuple(&full, i));
             }
@@ -180,19 +255,23 @@ impl Tuples {
     }
 
     pub fn to_json(&self, i: &Interner) -> String {
-        let mut entries: Vec<String> = Vec::new();
+        use serde_json::{Map, Value};
+        let mut map = Map::new();
         let mut preds: Vec<_> = self.relations.iter().collect();
         preds.sort_by_key(|(p, _)| i.resolve(**p));
         for (pred, tuples) in preds {
             let mut sorted_tuples: Vec<_> = tuples.iter().collect();
             sorted_tuples.sort();
-            let tuple_strs: Vec<String> = sorted_tuples.iter().map(|t| {
-                let terms: Vec<String> = t.iter().map(|term| term.to_json(i)).collect();
-                format!("[{}]", terms.join(","))
+            let json_tuples: Vec<Value> = sorted_tuples.iter().map(|t| {
+                let terms: Vec<Value> = t.iter().map(|term| {
+                    let resolved = term.resolve_names(i);
+                    serde_json::to_value(&resolved).expect("serialize term")
+                }).collect();
+                Value::Array(terms)
             }).collect();
-            entries.push(format!(r#""{}": [{}]"#, json_escape(i.resolve(*pred)), tuple_strs.join(",")));
+            map.insert(i.resolve(*pred).to_owned(), Value::Array(json_tuples));
         }
-        format!("{{{}}}", entries.join(","))
+        serde_json::to_string(&map).expect("serialize tuples")
     }
 }
 

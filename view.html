@@ -125,9 +125,9 @@ function render() {
     if (!hide) {
       html += '<table>';
       var groups = [
-        { rows: d.same, cls: 'tuple-same' },
         { rows: d.added, cls: 'tuple-new' },
-        { rows: d.removed, cls: 'tuple-old' }
+        { rows: d.removed, cls: 'tuple-old' },
+        { rows: d.same, cls: 'tuple-same' },
       ];
       for (var g = 0; g < groups.length; g++) {
         var rows = groups[g].rows, cls = groups[g].cls;

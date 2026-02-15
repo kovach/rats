@@ -232,8 +232,13 @@ impl<'a> Parser<'a> {
             }
             // It was just a predicate, not an app
             self.pos = saved2;
-            let sym = self.intern.intern(&name);
-            return Ok(apred(Name::Sym(sym)));
+            if name.starts_with('#') {
+                return Ok(apred(Name::Str(name)));
+                // return Ok(apred(Name::Str(String::from(&name[1..]))));
+            } else {
+                let sym = self.intern.intern(&name);
+                return Ok(apred(Name::Sym(sym)));
+            }
         }
         self.pos = saved;
 

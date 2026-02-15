@@ -64,7 +64,8 @@ runServer = do
   chan <- newBroadcastTChanIO
   _ <- forkIO $ watchAndRun chan
   putStrLn $ "Starting server on http://localhost:" <> show port
-  Warp.run port (app chan)
+  -- Warp.run port (app chan)
+  Warp.runSettings (Warp.setPort port $ Warp.setTimeout 0 Warp.defaultSettings) (app chan)
 
 app :: TChan TL.Text -> Wai.Application
 app chan = WaiWS.websocketsOr WS.defaultConnectionOptions (wsApp chan) httpApp

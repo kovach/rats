@@ -206,9 +206,9 @@ impl Tuples {
             .map_or(false, |set| set.contains(rest))
     }
 
-    pub fn lookup(&self, pred: Sym) -> impl Iterator<Item = &Tuple> {
+    pub fn lookup(&self, pred: &Sym) -> impl Iterator<Item = &Tuple> {
         self.relations
-            .get(&pred)
+            .get(pred)
             .into_iter()
             .flat_map(|set| set.iter())
     }

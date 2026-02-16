@@ -2,6 +2,7 @@ use std::collections::HashSet;
 use std::rc::Rc;
 
 use crate::types::*;
+use crate::reset_binding;
 
 // -- Unification --------------------------------------------------------------
 
@@ -105,33 +106,34 @@ pub fn specialize_(ctx: &mut Binding, val: &Expr, tuple: &Tuple, k: &mut dyn FnM
     match val {
         Expr::Unit | Expr::Bind(..) | Expr::NegAtom(..) => (),
         Expr::Atom(pat) => {
-            ctx.push();
-            if unify_tuples(ctx, pat, tuple) {
-                k(ctx, &Expr::Unit);
-            }
-            ctx.pop();
+            reset_binding!(ctx,
+                if unify_tuples(ctx, pat, tuple) {
+                    k(ctx, &Expr::Unit);
+                }
+            );
         }
         Expr::Join(a, b) => {
             let a_expr = a.as_ref();
             let b_expr = b.as_ref();
 
             // todo: with ctx
-            ctx.push();
-            specialize_(ctx, a_expr, tuple, &mut |c2, a2| {
-                k(c2, &join(a2.clone(), b_expr.clone()));
-            });
-            ctx.pop();
-            ctx.push();
-            specialize_(ctx, b_expr, tuple, &mut |c2, b2| {
-                k(c2, &join(a_expr.clone(), b2.clone()));
-            });
-            ctx.pop();
-            ctx.push();
-            specialize_(ctx, a_expr, tuple, &mut |c2, a2| {
-                specialize_(c2, b_expr, tuple, &mut |c3, b2| {
-                    k(c3, &join(a2.clone(), b2.clone()));
-                });
-            });
+            reset_binding!(ctx,
+                specialize_(ctx, a_expr, tuple, &mut |c2, a2| {
+                    k(c2, &join(a2.clone(), b_expr.clone()));
+                })
+            );
+            reset_binding!(ctx,
+                specialize_(ctx, b_expr, tuple, &mut |c2, b2| {
+                    k(c2, &join(a_expr.clone(), b2.clone()));
+                })
+            );
+            reset_binding!(ctx,
+                specialize_(ctx, a_expr, tuple, &mut |c2, a2| {
+                    specialize_(c2, b_expr, tuple, &mut |c3, b2| {
+                        k(c3, &join(a2.clone(), b2.clone()));
+                    });
+                })
+            );
         }
     }
 }
@@ -150,11 +152,11 @@ pub fn eval_(ctx : &mut Binding, val: &Expr, tuples: &Tuples, check: &Tuples, in
         Expr::Unit => k(ctx),
         Expr::Bind(x, y) => {
             let y_sub = sub_term(ctx, y);
-            ctx.push();
-            if unify_term(ctx, x, &y_sub) {
-                k(ctx);
-            }
-            ctx.pop();
+            reset_binding!(ctx,
+                if unify_term(ctx, x, &y_sub) {
+                    k(ctx);
+                }
+            );
         }
         Expr::Atom(pat) => {
             if pat.is_empty() {
@@ -164,11 +166,11 @@ pub fn eval_(ctx : &mut Binding, val: &Expr, tuples: &Tuples, check: &Tuples, in
                 Term::Pred(Name::Sym(sym)) => {
                     let vs = &pat[1..];
                     for stored_tuple in tuples.lookup(sym) {
-                        ctx.push();
-                        if unify_tuples(ctx, vs, stored_tuple) {
-                            k(ctx);
-                        }
-                        ctx.pop();
+                        reset_binding!(ctx,
+                            if unify_tuples(ctx, vs, stored_tuple) {
+                                k(ctx);
+                            }
+                        );
                     }
                 }
                 Term::Pred(Name::Str(pred_str)) => {
@@ -181,7 +183,7 @@ pub fn eval_(ctx : &mut Binding, val: &Expr, tuples: &Tuples, check: &Tuples, in
                     }
                     panic!("non-interned string: {}", pred_str);
                 }
-                _ => panic!("atom must start with Pred"),
+                _ => panic!("atom must start with Pred. saw: {:?}", *pat),
             }
         }
         Expr::NegAtom(at) => {
@@ -206,69 +208,6 @@ pub fn eval2(cl: &Closure, tuples: &Tuples, check: &Tuples, intern: &crate::sym:
     let mut result = Vec::new();
     eval_(&mut cl.ctx.clone(), &cl.val, tuples, check, intern, &mut |t| { result.push(t.clone()) });
     result
-}
-
-pub fn eval(cl: &Closure, tuples: &Tuples, check: &Tuples, intern: &crate::sym::Interner) -> Vec<Binding> {
-    match &cl.val {
-        Expr::Unit => vec![cl.ctx.clone()],
-        Expr::Bind(x, y) => {
-            let y_sub = sub_term(&cl.ctx, y);
-            let mut b = cl.ctx.clone();
-            if unify_term(&mut b, x, &y_sub) {
-                vec![b]
-            } else {
-                vec![]
-            }
-        }
-        Expr::Atom(pat) => {
-            if pat.is_empty() {
-                panic!("empty atom in eval");
-            }
-            match pat[0].as_ref() {
-                Term::Pred(Name::Sym(sym)) => {
-                    let vs = &pat[1..];
-                    let mut results = Vec::new();
-                    let mut c = cl.ctx.clone();
-                    for stored_tuple in tuples.lookup(sym) {
-                        c.push();
-                        if unify_tuples(&mut c, vs, stored_tuple) {
-                            results.push(c.clone());
-                        }
-                        c.pop();
-                    }
-                    results
-                }
-                Term::Pred(Name::Str(pred_str)) => {
-                    if pred_str.starts_with('#') {
-                        let op_name = &pred_str[1..];
-                        return eval_builtin_str(&cl.ctx, op_name, &pat[1..], intern);
-                    }
-                    panic!("non-interned string: {}", pred_str);
-                }
-                _ => panic!("atom must start with Pred"),
-            }
-        }
-        Expr::NegAtom(at) => {
-            let substituted = subst(&cl.ctx, at);
-            if matches!(substituted[0].as_ref(), Term::Blank) {
-                panic!("negatom substituted to blank pred");
-            }
-            if check.contains_tuple(&substituted) {
-                vec![]
-            } else {
-                vec![cl.ctx.clone()]
-            }
-        }
-        Expr::Join(a, b) => {
-            let mut results = Vec::new();
-            for c2 in eval(&Closure { ctx: cl.ctx.clone(), val: a.as_ref().clone() }, tuples, check, intern) {
-                for c3 in eval(&Closure { ctx: c2, val: b.as_ref().clone() }, tuples, check, intern) {
-                    results.push(c3);
-                }
-            }
-            results
-        }
-    }
 }
 
 fn eval_builtin_str(b: &Binding, op: &str, args: &[ATerm], intern: &crate::sym::Interner) -> Vec<Binding> {
@@ -320,11 +259,6 @@ pub fn eval1(cl: &Closure, t: &Tuple, ts: &Tuples, check: &Tuples, intern: &crat
             results.push(c3.clone());
         });
     });
-    //for cl2 in specialize(cl, t) {
-    //    for b in eval2(&cl2, ts, check, intern) {
-    //        results.push(b);
-    //    }
-    //}
     results
 }
 

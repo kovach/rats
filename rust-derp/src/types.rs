@@ -285,30 +285,27 @@ pub type Worklist = VecDeque<Tuple>;
 /// binary-search lookup. Inline for up to 8 entries.
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub struct Binding {
-    pub entries: SmallVec<[(Sym, ATerm); 8]>,
-    pub stack: SmallVec<[usize; 8]>,
+    pub entries: Vec<(Sym, ATerm)>,
+}
+
+#[macro_export]
+macro_rules! reset_binding {
+    ($x:expr, $fn:expr) => {
+        let tmp = $x.entries.len();
+        $fn;
+        $x.entries.truncate(tmp);
+    };
 }
 
 impl Binding {
     pub fn new() -> Self {
         Binding {
-            entries: SmallVec::new(),
-            stack: SmallVec::new(),
+            entries: Vec::with_capacity(16),
         }
     }
 
     fn insert(&mut self, key: Sym, val: ATerm) {
         self.entries.push((key, val));
-    }
-
-    pub fn push(&mut self) {
-        self.stack.push(self.entries.len());
-    }
-    pub fn pop(&mut self) {
-        match self.stack.pop() {
-            Some(k) => self.entries.truncate(k),
-            None => (),
-        }
     }
 
     pub fn lookup(&self, key: Sym) -> Option<&ATerm> {

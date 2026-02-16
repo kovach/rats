@@ -2,18 +2,14 @@
 main: !setup; !turn ~ !player o.
 
 setup: ?setup / (
-  !num s(s(s(z()))),
-  !other o x,
-  !other x o
+  !num s(s(z()))
+  | !other o x
+  | !other x o
 ).
 
-setup / ( ?num X | !foo X ).
--- ?num s(X) | !num X.
-
-exit
-
+?setup / ( ?num s(X) | !num X ).
 ?setup / ( ?num X | !row X | !col X ).
-?setup / ( ?row A | ?col B | !cell !C ~ !cell/row !C A ~ !cell/col !C B ).
+?setup / ( ?row A | ?col B | (!cell !C | !cell/row !C A | !cell/col !C B ) ).
 
 !move a there; !move b there; !move a here; !f.
 

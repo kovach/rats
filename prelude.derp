@@ -1,12 +1,15 @@
-eq A B -- le A B.
-eq B A -- le A B.
 eq A B -- eq B A.
+eq A B -- le A B, le B A.
 eq A B, eq B C -- eq A C.
 lt A B -- le A B.
 le A B, le B C -- le A C.
 le A B, lt B C -- lt A C.
 lt A B, le B C -- lt A C.
 lt A A -- zzz A.
+
+; todo
+m_max max(A,B), lt X A -- lt X max(A,B).
+m_max max(A,B), lt X B -- lt X max(A,B).
 
 ; move : id / it / to
 move Id It _, lt r(Id) T

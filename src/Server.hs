@@ -7,8 +7,9 @@ import qualified Network.Wai.Handler.WebSockets as WaiWS
 import qualified Network.WebSockets as WS
 import Network.HTTP.Types (status200, status404)
 import qualified Data.ByteString.Lazy as LBS
-import qualified Data.Text.Lazy as TL
-import qualified Data.Text.Lazy.Encoding as TLE
+import qualified Data.Text as TL
+import qualified Data.Text.IO as TIO
+import qualified Data.Text.Encoding as TLE
 import Control.Exception (catch, SomeException, try)
 import Control.Concurrent (forkIO, threadDelay)
 import Control.Concurrent.MVar (newEmptyMVar, tryPutMVar, takeMVar, tryTakeMVar)
@@ -53,7 +54,7 @@ watchAndRun chan = do
     isTttTurn event = takeFileName (eventPath event) == "ttt.turn"
     run = do
       compileAndRun
-      content <- TL.pack <$> readFile "out.tuples"
+      content <- TIO.readFile "out.tuples"
       atomically $ writeTChan chan content
 
 port :: Int

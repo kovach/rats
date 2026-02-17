@@ -1,7 +1,7 @@
-use std::collections::HashSet;
-use std::rc::Rc;
+use std::collections::{HashMap, HashSet};
 
 use crate::types::*;
+use crate::sym::{Sym, Interner};
 use crate::reset_binding;
 
 // -- Unification --------------------------------------------------------------
@@ -79,14 +79,6 @@ pub fn is_immediate(e: &Expr) -> bool {
     }
 }
 
-pub fn join(a: Expr, b: Expr) -> Expr {
-    match (&a, &b) {
-        (Expr::Unit, _) => b,
-        (_, Expr::Unit) => a,
-        _ => Expr::Join(Box::new(a), Box::new(b)),
-    }
-}
-
 pub fn atom(t: Tuple) -> Expr {
     if t.is_empty() {
         Expr::Unit
@@ -95,8 +87,78 @@ pub fn atom(t: Tuple) -> Expr {
     }
 }
 
+// -- Atom predicate collection ------------------------------------------------
+
+/// Walk an Expr and collect all (predicate_sym, arity) pairs from Atom nodes.
+fn atom_predicates(expr: &Expr) -> Vec<(Sym, usize)> {
+    let mut result = Vec::new();
+    fn walk(e: &Expr, out: &mut Vec<(Sym, usize)>) {
+        match e {
+            Expr::Atom(pat) if !pat.is_empty() => {
+                if let Term::Pred(Name::Sym(sym)) = pat[0].as_ref() {
+                    out.push((*sym, pat.len() - 1));
+                }
+            }
+            Expr::Join(a, b) => {
+                walk(a, out);
+                walk(b, out);
+            }
+            _ => {}
+        }
+    }
+    walk(expr, &mut result);
+    result.sort();
+    result.dedup();
+    result
+}
+
 // -- Specialize ---------------------------------------------------------------
 
+// modify val's join order to take into account variables known to be bound
+pub fn optimize_with(bound: &mut Vec<Name>, val: Expr) -> Expr {
+    fn extract_best_atom(bound: &[Name], expr: &Expr) -> Option<(Tuple, Expr)> {
+        match expr {
+            Expr::Atom(tuple) => Some((tuple.clone(), Expr::Unit)),
+            Expr::Join(a, b) => {
+                match (extract_best_atom(bound, a), extract_best_atom(bound, b)) {
+                    (Some((lt, la)), Some((rt, ra))) => {
+                        let l_score = count_shared(&tuple_vars(&lt), bound);
+                        let r_score = count_shared(&tuple_vars(&rt), bound);
+                        if l_score >= r_score {
+                            Some((lt, join(la, *b.clone())))
+                        } else {
+                            Some((rt, join(*a.clone(), ra)))
+                        }
+                    }
+                    (Some((t, rest)), None) => Some((t, join(rest, *b.clone()))),
+                    (None, Some((t, rest))) => Some((t, join(*a.clone(), rest))),
+                    (None, None) => None,
+                }
+            }
+            _ => None,
+        }
+    }
+
+    let mut remaining = val;
+    let mut result = Expr::Unit;
+
+    while let Some((atom, rest)) = extract_best_atom(bound, &remaining) {
+        let atom_vars = tuple_vars(&atom);
+        for v in atom_vars {
+            if !bound.contains(&v) {
+                bound.push(v);
+            }
+        }
+        result = join(result, Expr::Atom(atom));
+        remaining = rest;
+    }
+
+    join(result, remaining)
+}
+
+pub fn optimize(ctx: &Binding, val: Expr) -> Expr {
+    optimize_with(&mut ctx.bound_vars(), val)
+}
 /// specialize (Closure _ Unit) _ = []
 /// specialize (Closure _ Bind{}) _ = []
 /// specialize (Closure _ NegAtom{}) _ = []
@@ -119,12 +181,14 @@ pub fn specialize_(ctx: &mut Binding, val: &Expr, tuple: &Tuple, k: &mut dyn FnM
             // todo: with ctx
             reset_binding!(ctx,
                 specialize_(ctx, a_expr, tuple, &mut |c2, a2| {
-                    k(c2, &join(a2.clone(), b_expr.clone()));
+                    let e = optimize(c2, join(a2.clone(), b_expr.clone()));
+                    k(c2, &e);
                 })
             );
             reset_binding!(ctx,
                 specialize_(ctx, b_expr, tuple, &mut |c2, b2| {
-                    k(c2, &join(a_expr.clone(), b2.clone()));
+                    let e = optimize(c2, join(a_expr.clone(), b2.clone()));
+                    k(c2, &e);
                 })
             );
             reset_binding!(ctx,
@@ -204,7 +268,7 @@ pub fn eval_(ctx : &mut Binding, val: &Expr, tuples: &Tuples, check: &Tuples, in
         }
     }
 }
-pub fn eval2(cl: &Closure, tuples: &Tuples, check: &Tuples, intern: &crate::sym::Interner) -> Vec<Binding> {
+pub fn eval(cl: &Closure, tuples: &Tuples, check: &Tuples, intern: &crate::sym::Interner) -> Vec<Binding> {
     let mut result = Vec::new();
     eval_(&mut cl.ctx.clone(), &cl.val, tuples, check, intern, &mut |t| { result.push(t.clone()) });
     result
@@ -272,8 +336,115 @@ pub fn step_rule(rule: &Rule, t: &Tuple, ts: &Tuples, check: &Tuples, intern: &c
 
 pub fn eval_rule(rule: &Rule, ts: &Tuples, check: &Tuples, intern: &crate::sym::Interner) -> Vec<Vec<Tuple>> {
     let mut results = Vec::new();
-    for b in eval2(&rule.body, ts, check, intern) {
+    for b in eval(&rule.body, ts, check, intern) {
         results.push(substs(&b, &rule.head));
+    }
+    results
+}
+
+// -- Precomputed specialization -----------------------------------------------
+
+/// Walk an expression's Join tree and collect all ways to extract atom(s)
+/// matching `pred` from it. Each result is a (pats, remaining) pair where
+/// `pats` are the extracted atom patterns and `remaining` is what's left.
+fn collect_extractions(
+    val: &Expr, pred: Sym,
+    k: &mut dyn FnMut(Vec<Tuple>, Expr),
+) {
+    match val {
+        Expr::Unit | Expr::Bind(..) | Expr::NegAtom(..) => (),
+        Expr::Atom(pat) => {
+            if let Term::Pred(Name::Sym(sym)) = pat[0].as_ref() {
+                if *sym == pred {
+                    k(vec![pat.clone()], Expr::Unit);
+                }
+            }
+        }
+        Expr::Join(a, b) => {
+            let a_expr = a.as_ref();
+            let b_expr = b.as_ref();
+            // Left only
+            collect_extractions(a_expr, pred, &mut |pats, rest_a| {
+                k(pats, join(rest_a, b_expr.clone()));
+            });
+            // Right only
+            collect_extractions(b_expr, pred, &mut |pats, rest_b| {
+                k(pats, join(a_expr.clone(), rest_b));
+            });
+            // Both: extract one atom from each side
+            collect_extractions(a_expr, pred, &mut |pats_a, rest_a| {
+                collect_extractions(b_expr, pred, &mut |pats_b, rest_b| {
+                    let mut combined = pats_a.clone();
+                    combined.extend(pats_b.clone());
+                    k(combined, join(rest_a.clone(), rest_b));
+                });
+            });
+        }
+    }
+}
+
+/// Build precomputed specializations for all non-immediate rules.
+/// Returns a map from predicate Sym to the list of SpecializedRules that match it.
+pub fn prespecialize(rules: &[&Rule]) -> HashMap<Sym, Vec<SpecializedRule>> {
+    let mut result: HashMap<Sym, Vec<SpecializedRule>> = HashMap::new();
+
+    for rule in rules {
+        let preds = atom_predicates(&rule.body.val);
+        let base_bound = rule.body.ctx.bound_vars();
+        for (pred_sym, _arity) in preds {
+            let mut entries = Vec::new();
+            collect_extractions(&rule.body.val, pred_sym, &mut |pats, remaining| {
+                // let mut bound = base_bound.clone();
+                // for p in &pats {
+                //     for v in tuple_vars(p) {
+                //         if !bound.contains(&v) { bound.push(v); }
+                //     }
+                // }
+                // let remaining = optimize_with(&mut bound, remaining);
+                entries.push(SpecEntry { pats, remaining });
+            });
+
+            if !entries.is_empty() {
+                result.entry(pred_sym).or_default().push(SpecializedRule {
+                    entries,
+                    base_ctx: rule.body.ctx.clone(),
+                    head: rule.head.clone(),
+                });
+            }
+        }
+    }
+    result
+}
+
+/// Evaluate a precomputed specialization against a concrete tuple.
+/// `t` is the full tuple (with pred at [0]).
+pub fn eval1_spec(
+    spec: &SpecializedRule,
+    t: &Tuple,
+    ts: &Tuples,
+    check: &Tuples,
+    intern: &Interner,
+) -> Vec<Vec<Tuple>> {
+    let mut results = Vec::new();
+    for entry in &spec.entries {
+        let mut ctx = spec.base_ctx.clone();
+        // Unify each atom pattern against the tuple
+        let mut ok = true;
+        let save = ctx.entries.len();
+        for pat in &entry.pats {
+            if !unify_tuples(&mut ctx, pat, t) {
+                ok = false;
+                break;
+            }
+        }
+        if !ok {
+            ctx.entries.truncate(save);
+            continue;
+        }
+        eval_(&mut ctx, &entry.remaining, ts, check, intern, &mut |c3| {
+            results.push(substs(c3, &spec.head));
+        });
+        ctx.entries.truncate(save);
     }
     results
 }
@@ -364,7 +535,7 @@ pub fn apply_rules(rules: &[Rule], ts: &Tuples, intern: &crate::sym::Interner) -
     result
 }
 
-pub fn iter_rules(initial: HashSet<Tuple>, all_rules: &[Rule], intern: &crate::sym::Interner) -> Tuples {
+pub fn iter_rules(initial: HashSet<Tuple>, all_rules: &[Rule], intern: &Interner) -> Tuples {
     let (start, rest): (Vec<&Rule>, Vec<&Rule>) = all_rules.iter().partition(|r| is_immediate(&r.body.val));
 
     let mut ts0 = initial;
@@ -377,12 +548,23 @@ pub fn iter_rules(initial: HashSet<Tuple>, all_rules: &[Rule], intern: &crate::s
         }
     }
 
+    let specs = prespecialize(&rest);
+
     let f = move |t: &Tuple, old: &Tuples, check: &Tuples| -> Vec<Vec<Tuple>> {
-        let mut results = Vec::new();
-        for rule in &rest {
-            results.extend(step_rule(rule, t, old, check, intern));
+        let pred = match t[0].as_ref() {
+            Term::Pred(Name::Sym(sym)) => *sym,
+            _ => return Vec::new(),
+        };
+        match specs.get(&pred) {
+            Some(spec_rules) => {
+                let mut results = Vec::new();
+                for spec_rule in spec_rules {
+                    results.extend(eval1_spec(spec_rule, t, old, check, intern));
+                }
+                results
+            }
+            None => Vec::new(),
         }
-        results
     };
 
     alt_iter(10, &ts0, &f, &Tuples::new())

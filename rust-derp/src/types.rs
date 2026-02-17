@@ -144,6 +144,14 @@ impl Term {
             Term::Str(n @ Name::Sym(_)) => Term::Str(n.clone()),
         }
     }
+
+    pub fn vars(&self) -> Vec<Name> {
+        match self {
+            Term::Var(n) => vec![n.clone()],
+            Term::App(_, args) => args.iter().flat_map(|a| a.vars()).collect(),
+            Term::Pred(_) | Term::Num(_) | Term::Blank | Term::Str(_) => vec![],
+        }
+    }
 }
 
 // -- Tuple --------------------------------------------------------------------
@@ -152,6 +160,10 @@ pub type Tuple = SmallVec<[ATerm; 6]>;
 
 pub fn pp_tuple(t: &Tuple, i: &Interner) -> String {
     t.iter().map(|term| term.pp(i)).collect::<Vec<_>>().join(" ")
+}
+
+pub fn tuple_vars(t: &Tuple) -> Vec<Name> {
+    t.iter().flat_map(|term| term.vars()).collect()
 }
 
 // -- Tuples (the relation store) ----------------------------------------------
@@ -319,7 +331,6 @@ impl Binding {
 
     pub fn try_extend(&mut self, key: Sym, val: &ATerm) -> bool {
         match self.lookup(key) {
-        // match self.entries.binary_search_by_key(&key, |(k, _)| *k) {
             Some(v) => {
                 if v == val {
                     true
@@ -329,7 +340,6 @@ impl Binding {
             }
             None => {
                 self.insert(key, val.clone());
-                // self.entries.insert(idx, (key, val.clone()));
                 true
             }
         }
@@ -342,6 +352,14 @@ impl Binding {
             .collect::<Vec<_>>()
             .join(" / ")
     }
+
+    pub fn bound_vars(&self) -> Vec<Name> {
+        self.entries.iter().map(|(k, _)| Name::Sym(*k)).collect()
+    }
+}
+
+pub fn count_shared<T: PartialEq>(a: &[T], b: &[T]) -> usize {
+    a.iter().filter(|x| b.contains(x)).count()
 }
 
 // -- Expression ---------------------------------------------------------------
@@ -353,6 +371,14 @@ pub enum Expr {
     Bind(ATerm, ATerm),
     Join(Box<Expr>, Box<Expr>),
     Unit,
+}
+
+pub fn join(a: Expr, b: Expr) -> Expr {
+    match (&a, &b) {
+        (Expr::Unit, _) => b,
+        (_, Expr::Unit) => a,
+        _ => Expr::Join(Box::new(a), Box::new(b)),
+    }
 }
 
 // -- Closure and Rule ---------------------------------------------------------
@@ -368,5 +394,23 @@ pub type CE = Closure;
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Rule {
     pub body: CE,
+    pub head: Vec<Tuple>,
+}
+
+// -- Precomputed specialization -----------------------------------------------
+
+/// One way to extract atom(s) matching a predicate from a rule's Join tree.
+/// `pats` are the atom patterns to unify against the incoming tuple.
+/// `remaining` is the expression left after removing those atoms.
+#[derive(Clone, Debug)]
+pub struct SpecEntry {
+    pub pats: Vec<Tuple>,
+    pub remaining: Expr,
+}
+
+#[derive(Clone, Debug)]
+pub struct SpecializedRule {
+    pub entries: Vec<SpecEntry>,
+    pub base_ctx: Binding,
     pub head: Vec<Tuple>,
 }

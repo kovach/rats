@@ -1,6 +1,6 @@
 use crate::sym::Interner;
 use crate::types::*;
-use crate::core::{atom, join};
+use crate::core::{atom};
 
 // -- Parser state -------------------------------------------------------------
 

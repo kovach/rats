@@ -1,7 +1,4 @@
-mod sym;
-mod types;
-mod core;
-mod parse;
+use derp::{sym, types, core, parse};
 
 use std::collections::HashSet;
 use std::env;

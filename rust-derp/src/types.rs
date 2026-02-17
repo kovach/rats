@@ -414,3 +414,47 @@ pub struct SpecializedRule {
     pub base_ctx: Binding,
     pub head: Vec<Tuple>,
 }
+
+// -- Compiled expression types ------------------------------------------------
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum VarOp {
+    Set(u16),    // first occurrence — write to slot unconditionally
+    Check(u16),  // later occurrence — compare slot value for equality
+}
+
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub enum CTerm {
+    Var(VarOp),
+    Pred(Name),
+    Num(i32),
+    Blank,
+    App(Name, Vec<CTerm>),
+    Str(Name),
+}
+
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub enum CExpr {
+    Atom(Sym, Vec<CTerm>),
+    NegAtom(Vec<CTerm>),
+    Bind(CTerm, CTerm),
+    Join(Box<CExpr>, Box<CExpr>),
+    Unit,
+}
+
+/// Compiled version of SpecEntry — self-contained with all data needed for eval
+#[derive(Clone, Debug)]
+pub struct CSpecEntry {
+    pub pats: Vec<Vec<CTerm>>,       // compiled atom patterns (each without the pred)
+    pub remaining: CExpr,            // compiled remaining expression
+    pub head: Vec<Vec<CTerm>>,       // compiled head tuples for substitution
+    pub num_slots: u16,              // total number of variable slots
+    pub base_ctx_len: u16,           // number of base_ctx entries (first N slots)
+    pub base_ctx: Binding,           // original base_ctx for initializing slots
+}
+
+/// Compiled version of SpecializedRule
+#[derive(Clone, Debug)]
+pub struct CSpecializedRule {
+    pub entries: Vec<CSpecEntry>,
+}

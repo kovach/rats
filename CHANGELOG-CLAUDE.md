@@ -1,3 +1,10 @@
+# 26/02/16
+## specialize rules once at startup
+  - af752c6f74ae
+  - see [plan](plans/4.md)
+  - This was a more substantial change with very little prompting required.
+    Its initial approach was incorrect, but it corrected it only being told a test failed.
+
 # 26/02/14
 ## use serde
   - see [plan](plans/3.md)

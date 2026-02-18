@@ -1,4 +1,13 @@
 # 26/02/16
+## optimize binding use
+  - add a compilation step that identifies where each variable is set (once per query) vs unified (every other reference).
+    removes need for binding scope operations
+  - claude overwrote its initial plan at some point, before I copied it over
+    - the new [plan](plans/5.md) was generated when I instructed to eliminate a weird and overcomplicated indirection it introduced while compiling
+      - this was easily fixed
+  - created a parallel AST (CTerm, CExpr) for this representation, which seems unnecessary.
+    - I asked why, and it gave a plausible justification: would have required modifying more existing code
+
 ## specialize rules once at startup
   - af752c6f74ae
   - see [plan](plans/4.md)

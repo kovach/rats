@@ -109,3 +109,21 @@ executable rats
     ghc-options:
         -O2
         -fprof-auto
+
+executable draw-diagram
+    import:           warnings
+
+    main-is:          Main.hs
+
+    other-modules:    DrawDiagram.Core, DrawDiagram.Layout
+
+    build-depends:    base ^>=4.21.0.0,
+                      diagrams-lib,
+                      diagrams-svg,
+                      svg-builder,
+                      colour,
+                      text
+
+    hs-source-dirs:   src/DrawDiagram, src
+
+    default-language: GHC2024

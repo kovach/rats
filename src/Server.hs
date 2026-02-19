@@ -64,7 +64,7 @@ toT "r" arg = Just (R (termToKey arg))
 toT _ _     = Nothing
 
 tuplesToProblem :: [D.Tuple] -> Problem T
-tuplesToProblem tuples = Problem intervals constraints
+tuplesToProblem tuples = Problem intervals constraints True
   where
     ids = [arg | [D.TermPred "isId", arg] <- tuples]
     tags =

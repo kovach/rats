@@ -33,7 +33,7 @@ renderAt colorIndex iv =
       depth = floor $ fromJust $ ivNesting iv
       -- y = negate (fromIntegral depth * (barHeight + rowGap))
       y = negate (fromIntegral (depth) * (barHeight + rowGap))
-      bar = roundedRect w barHeight 10 # fc (depthColour colorIndex) # lc black # lw thin
+      bar = roundedRect w barHeight 5 # fc (depthColour colorIndex) # lc black # lw thin
       label = text (ivType iv) # fontSizeL 6 # fc black
       labeledBar = ((label # translateX 0 # translateY (0)) `atop` (bar))
             # svgAttr "onmouseover" "this.classList.add('highlight')"

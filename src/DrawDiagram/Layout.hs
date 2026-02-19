@@ -22,20 +22,22 @@ data Constraint a
 
 data Problem a = Problem
   { is :: [I a]
-  , cs :: [Constraint a] }
+  , cs :: [Constraint a]
+  , saturated :: Bool }
 
-prim x = Problem [I x (L x) (R x)] [L x `CLt` R x]
+prim x = Problem [I x (L x) (R x)] [L x `CLt` R x] True
+constraints cs = Problem [] cs False
 instance Semigroup (Problem a) where
-  (Problem i1 c1) <> (Problem i2 c2) = Problem (i1 <> i2) (c1 <> c2)
+  (Problem i1 c1 b1) <> (Problem i2 c2 b2) = Problem (i1 <> i2) (c1 <> c2) (b1 && b2)
 
 t1 =
   prim "a" <> prim "b"
-  <> Problem [] [ CLt (R "a") (L "b") ]
+  <> Problem [] [ CLt (R "a") (L "b") ] False
 
 -- a contains b, a overlaps c (but doesn't contain it), d after c
 t2 =
   prim "a" <> prim "b" <> prim "c" <> prim "d"
-  <> Problem []
+  <> constraints
     [ CLt (L "a") (L "b")
     , CLt (R "b") (R "a")
     , CLt (L "c") (R "a")  -- L c < R a  (c starts before a ends)
@@ -52,27 +54,27 @@ data IntervalDiagram = IntervalDiagram
 demoDiagrams =
   [ IntervalDiagram "a / b" $
     prim "a" <> prim "b"
-    <> Problem []
+    <> constraints
       [ CLt (L "a") (L "b")
       , CLt (R "b") (R "a") ]
   , IntervalDiagram "a; b" $
     prim "a" <> prim "b"
-    <> Problem []
+    <> constraints
       [ CLt (R "a") (L "b") ]
   , IntervalDiagram "a, b" $
     prim "a" <> prim "b"
-    <> Problem []
+    <> constraints
       [ CLt (L "a") (L "b")
       , CLt (L "b") (R "a")
       , CLt (R "a") (R "b") ]
   , IntervalDiagram "a @ b" $
     prim "a" <> prim "b"
-    <> Problem []
+    <> constraints
       [ CLt (L "a") (L "b")
       , CLt (L "b") (R "a") ]
   , IntervalDiagram "a ~> b" $
     prim "a" <> prim "b"
-    <> Problem []
+    <> constraints
       [ CLt (L "a") (L "b")
       , CEq (R "a") (R "b") ]
   , IntervalDiagram "several" t2
@@ -80,7 +82,7 @@ demoDiagrams =
 
 -- fills in the transitive closure of the `CEq` and `CLt` constraints
 saturate :: Eq a => Problem a -> Problem a
-saturate (Problem is cs) = Problem is (fixpoint step cs)
+saturate (Problem is cs _) = Problem is (fixpoint step cs) True
   where
     fixpoint f xs =
       let xs' = f xs
@@ -103,7 +105,7 @@ saturate (Problem is cs) = Problem is (fixpoint step cs)
 layout :: Eq a => Problem a -> [Interval]
 layout input = result
   where
-    Problem {is, cs} = saturate input
+    Problem {is, cs} = if saturated input then input else saturate input
 
     result = verticalLayout $ map (fix bindings) is
     bindings = normalize' $ go [] is

@@ -1,24 +1,19 @@
 -- Setup --
 main: !setup; (!turn ~ !player o).
 
-
 setup: ?setup / (
   !num s(s(z()))
   | !other o x
   | !other x o
 ).
 
-
 !num X \ ?setup / ?num s(X).
-
 (!row X | !col X) \ ?setup / ?num X.
 ?setup / ( ?row A | ?col B |
   ( !cell !C | !cell/row !C A | !cell/col !C B )
 ).
 
-!move a there; !move b there; !move a here; !f.
-
-?f; !g; !h; !i; !j; !k.
+?setup; !move a there; !move b there; !move a here; !f.
 
 -- expect 2 results
 (?at X Y, ?f) / !z X Y.

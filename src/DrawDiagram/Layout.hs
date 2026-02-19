@@ -14,7 +14,7 @@ data Interval = Interval
   } deriving (Show)
 
 data T = L String | R String deriving (Eq)
-data I a = I String a a
+data I a = I { ty :: String, left :: a, right :: a }
 data Constraint a
   = CEq a a
   | CLt a a
@@ -100,9 +100,11 @@ saturate (Problem is cs) = Problem is (fixpoint step cs)
         ltNew = [CLt a c | CLt a b <- cs', CLt b' c <- cs', b == b']
     notIn x xs = not (x `elem` xs)
 
-layout :: Problem T -> [Interval]
+layout :: Eq a => Problem a -> [Interval]
 layout input = result
   where
+    Problem {is, cs} = saturate input
+
     result = verticalLayout $ map (fix bindings) is
     bindings = normalize' $ go [] is
 
@@ -117,7 +119,6 @@ layout input = result
       | isJust (lookup t bs) = bs
       | otherwise = (t, pickValue t bs) : bs
 
-    Problem {is, cs} = saturate input
     pickValue t bs =
       let lowers = [v | CLt other t' <- cs, t' == t, v <- maybeToList (lookup other bs)]
           uppers = [v | CLt t' other <- cs, t' == t, v <- maybeToList (lookup other bs)]

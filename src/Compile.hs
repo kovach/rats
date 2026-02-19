@@ -369,20 +369,19 @@ demo name rules = do
     byName (RuleStatement (Just n) _) | n == name = True
     byName _ = False
 
-main1 = do
-  --pr0 <- readFile "card.tin"
-  pr0 <- readFile "ttt.turn"
+main1 :: String -> IO String
+main1 base = do
+  pr0 <- readFile (base ++ ".turn")
   let ttt = TP.parse pr0
   let name _ r@(RuleStatement (Just _) _) = r
       name n (RuleStatement Nothing r) = RuleStatement (Just n) r
       name _ x = x
   let rules = zipWith name [ "r" <> show i | i <- [1..] ] ttt
-  -- demo "r2" rules
   let ruleText = compile rules
   prelude <- GD.readPrelude
   let result = prelude <> ruleText
   putStrLn $ "generated derp:\n" <> ruleText
-  writeFile "out.derp" result
+  writeFile (base ++ ".derp") result
   pure result
 
 main2' input = do
@@ -410,6 +409,6 @@ main2 = do
   main2' input
 
 main3 = do
-  str <- main1
+  str <- main1 "ttt"
   main2' str
 

@@ -8,6 +8,7 @@ import Data.Monoid (Sum(..))
 import Data.List hiding (take)
 import qualified Data.List
 import Data.Maybe
+import System.Environment (getArgs)
 import Data.Functor.Identity
 import Data.Either
 import Data.Set (Set)
@@ -28,5 +29,14 @@ import Server (runServer)
 import Compile
 
 main = do
-  -- tuples <- main3
-  runServer
+  args <- getArgs
+  let filename = case args of
+        (f:_) -> f
+        []    -> error "usage: rats <file.turn>"
+      base = fromMaybe filename (stripSuffix ".turn" filename)
+  runServer base
+
+stripSuffix :: String -> String -> Maybe String
+stripSuffix suffix s
+  | suffix `isSuffixOf` s = Just (Data.List.take (length s - length suffix) s)
+  | otherwise = Nothing

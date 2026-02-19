@@ -1,11 +1,13 @@
 -- Setup --
-main: !setup; !turn ~ !player o.
+main: !setup; (!turn ~ !player o).
+
 
 setup: ?setup / (
   !num s(s(z()))
   | !other o x
   | !other x o
 ).
+exit
 
 !num X \ ?setup / ?num s(X).
 (!row X | !col X) \ ?setup / ?num X.

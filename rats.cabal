@@ -74,6 +74,7 @@ executable rats
       , Derp.Types, Derp.Core, Derp.Parse
       , GenSouffle, Derp.Gen
       , Server
+      , DrawDiagram.Core, DrawDiagram.Layout
 
     -- LANGUAGE extensions used by modules in this package.
     -- other-extensions:
@@ -95,7 +96,11 @@ executable rats
                       bytestring,
                       process,
                       fsnotify,
-                      filepath
+                      filepath,
+                      diagrams-lib,
+                      diagrams-svg,
+                      svg-builder,
+                      colour,
 
 
     -- Directories containing source files.
@@ -109,6 +114,27 @@ executable rats
     ghc-options:
         -O2
         -fprof-auto
+
+-- breaks LSP client!
+-- executable test-pipeline
+--     import:           warnings
+--     default-extensions: PatternSynonyms, FunctionalDependencies, GeneralizedNewtypeDeriving
+--     main-is:          TestPipeline.hs
+--     other-modules:
+--       Basic, ParserCombinator, MMap, Binding, Types, Compile, Parser
+--       , Derp.Types, Derp.Core, Derp.Parse
+--       , GenSouffle, Derp.Gen
+--       , Server
+--       , DrawDiagram.Core, DrawDiagram.Layout
+--     build-depends:    base ^>=4.21.0.0,
+--                       mtl, text, stm, containers, split,
+--                       unordered-containers, hashable,
+--                       warp, wai, wai-websockets, websockets,
+--                       aeson, http-types, bytestring,
+--                       process, fsnotify, filepath,
+--                       diagrams-lib, diagrams-svg, svg-builder, colour
+--     hs-source-dirs:   src
+--     default-language: GHC2024
 
 executable draw-diagram
     import:           warnings

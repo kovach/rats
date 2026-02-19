@@ -4,6 +4,8 @@ import Data.Maybe
 import Data.List
 import Diagrams.Prelude
 import Diagrams.Backend.SVG
+import qualified Data.Text as T
+import qualified Graphics.Svg as Svg
 
 import DrawDiagram.Layout
 
@@ -54,3 +56,14 @@ makeDiagram (IntervalDiagram {title, content}) = (l, titled)
     titleLabel = text title # fontSizeL 10 # fc black -- # alignL # alignT
     titled = (titleLabel ||| strutX (fromIntegral $ 3 * length title) ||| dia) # frame 30
 
+writeDiagram fn iD = do
+  let (_ivs, dia) = makeDiagram iD
+      opts = SVGOptions (mkWidth 800) (Just cssDefs) (T.pack "") [] True
+      svgElement = renderDia SVG opts dia
+      path = "diagrams/" <> fn
+  print (title iD, _ivs)
+  Svg.renderToFile path svgElement
+
+cssDefs :: Svg.Element
+cssDefs = Svg.style_ [] $ Svg.toElement $ T.pack
+  ".highlight { fill: yellow !important; fill-opacity: 0.85 !important; }"

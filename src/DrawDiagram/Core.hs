@@ -33,10 +33,10 @@ renderAt colorIndex iv =
       y = negate (fromIntegral (depth) * (barHeight + rowGap))
       bar = roundedRect w barHeight 10 # fc (depthColour colorIndex) # lc black # lw thin
       label = text (ivType iv) # fontSizeL 20 # fc black
-      group = (label `atop` bar)
+      labeledBar = ((label # translateX 0 # translateY (-5)) `atop` (bar))
             # svgAttr "onmouseover" "this.classList.add('highlight')"
             # svgAttr "onmouseout" "this.classList.remove('highlight')"
-      piece = (p2 (x, y), group)
+      piece = (p2 (x, y), labeledBar)
   in [piece]
 
 depthColour :: Int -> Colour Double
@@ -52,5 +52,5 @@ makeDiagram (IntervalDiagram {title, content}) = (l, titled)
     l = layout content
     dia = renderIntervals l # alignBL
     titleLabel = text title # fontSizeL 10 # fc black -- # alignL # alignT
-    titled = (titleLabel ||| strutX 15 ||| dia) # frame 30
+    titled = (titleLabel ||| strutX (fromIntegral $ 3 * length title) ||| dia) # frame 30
 

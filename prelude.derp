@@ -7,10 +7,6 @@ le A B, lt B C -- lt A C.
 lt A B, le B C -- lt A C.
 lt A A -- zzz A.
 
-; todo
-m_max max(A,B), lt X A -- lt X max(A,B).
-m_max max(A,B), lt X B -- lt X max(A,B).
-
 ; move : id / it / to
 move Id It _, lt r(Id) T
 ---

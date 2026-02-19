@@ -51,11 +51,13 @@ data AtomType
   = AtomNeg
   | AtomPos
   | AtomAsk
+  | AtomInterrobang
   deriving (Show, Eq, Ord)
 
 isPositive AtomPos = True
 isPositive AtomNeg = False
 isPositive AtomAsk = False
+isPositive AtomInterrobang = False
 
 data PVar
   = PVar2 Var [Var] Name
@@ -63,6 +65,18 @@ data PVar
   deriving (Show, Eq, Ord)
 
 data Pattern = Pattern { ty :: AtomType, id :: PVar, terms :: [Term] }
+  deriving (Show, Eq, Ord)
+
+data E = Atom Pattern
+       | EVar Term
+       | After E
+       | And E E
+       | Seq E E
+       | Par E E
+       | Over E E
+       | Same E E
+       | At E E
+       | Under E E
   deriving (Show, Eq, Ord)
 
 data Constraint
@@ -78,23 +92,11 @@ data Constraint
 pattern Lt a b = Cmp OpLt a b
 pattern Eql a b = Cmp OpEq a b
 
-data E = Atom Pattern
-       | EVar Term
-       | After E
-       | And E E
-       | Seq E E
-       | Par E E
-       | Over E E
-       | Same E E
-       | At E E
-       | Under E E
-       | Bracket E
-  deriving (Show, Eq, Ord)
-
 -- todo: generate count summary for each Pragma
 data Statement = Pragma Pred | RuleStatement (Maybe Name) E
   deriving (Show, Eq, Ord)
 
+-- Compiler Output
 data Rule = Rule { body :: Set Constraint, head :: Set Constraint }
   deriving (Show, Eq, Ord)
 
@@ -108,7 +110,7 @@ fresh :: (MonadFreshVarState m) => String -> m Name
 fresh t = do
   Sum i <- gets (M.lookup t);
   modify (M.insert t 1)
-  pure $ t <> show i -- (if i == 0 then "" else show i)
+  pure $ t <> show i
 
 fixId = map fix
     where

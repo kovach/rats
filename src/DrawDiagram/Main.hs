@@ -14,10 +14,11 @@ main = do
   writeFile "diagram.html" htmlPage
   putStrLn $ "Wrote " ++ show (length demoDiagrams) ++ " SVGs and diagram.html"
 
-writeDiagram path iD = do
+writeDiagram fn iD = do
   let (ivs, dia) = makeDiagram iD
       opts = SVGOptions (mkWidth 800) (Just cssDefs) (T.pack "") [] True
       svgElement = renderDia SVG opts dia
+      path = "diagrams/" <> fn
   print (title iD, ivs)
   Svg.renderToFile path svgElement
 

@@ -16,12 +16,24 @@
   tr.tuple-same td { color: #f9e2af; }
   tr.tuple-new td { color: #a6e3a1; }
   tr.tuple-old td { color: #f38ba8; }
+  .toggle-bar { margin-bottom: 16px; }
+  .toggle-bar button { background: #313244; color: #cdd6f4; border: 1px solid #45475a; padding: 6px 16px; cursor: pointer; font-family: inherit; font-size: 13px; }
+  .toggle-bar button.active { background: #89b4fa; color: #1e1e2e; }
+  #diagram-view { background: white; overflow-x: auto; }
+  #diagram-view svg { height: auto; }
 </style>
 </head>
 <body>
+<div class="toggle-bar">
+  <button id="btn-tuples" class="active" onclick="switchView('tuples')">Tuples</button>
+  <button id="btn-diagram" onclick="switchView('diagram')">Diagram</button>
+</div>
 <h1 id="header" onclick="collapseAll()">Derp</h1>
 <div id="status" class="status">Connecting…</div>
-<div id="content"></div>
+<div id="tuples-view">
+  <div id="content"></div>
+</div>
+<div id="diagram-view" style="display:none"></div>
 <script>
 function renderTerm(t) {
   switch (t.tag) {
@@ -145,11 +157,28 @@ function render() {
   }
   document.getElementById('content').innerHTML = html;
 }
+var currentView = 'tuples';
+function switchView(view) {
+  currentView = view;
+  document.getElementById('btn-tuples').className = view === 'tuples' ? 'active' : '';
+  document.getElementById('btn-diagram').className = view === 'diagram' ? 'active' : '';
+  document.getElementById('tuples-view').style.display = view === 'tuples' ? '' : 'none';
+  document.getElementById('header').style.display = view === 'tuples' ? '' : 'none';
+  document.getElementById('diagram-view').style.display = view === 'diagram' ? '' : 'none';
+  if (view === 'diagram') fetchDiagram();
+}
+function fetchDiagram() {
+  fetch('/diagram.svg?' + Date.now())
+    .then(function(r) { return r.text(); })
+    .then(function(svg) { document.getElementById('diagram-view').innerHTML = svg; })
+    .catch(function() { document.getElementById('diagram-view').innerHTML = '<p style="color:#f38ba8">Failed to load diagram</p>'; });
+}
 var ws = new WebSocket('ws://' + location.host + '/');
 ws.onopen = function() { document.getElementById('status').textContent = 'Connected'; };
 ws.onmessage = function(e) {
   document.getElementById('status').textContent = '';
   updateData(JSON.parse(e.data));
+  if (currentView === 'diagram') fetchDiagram();
 };
 ws.onclose = function() { document.getElementById('status').textContent = 'Disconnected'; };
 ws.onerror = function() { document.getElementById('status').textContent = 'Error'; };

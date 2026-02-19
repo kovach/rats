@@ -15,7 +15,7 @@ unitWidth = 40
 
 -- | Height of a single interval bar.
 barHeight :: Double
-barHeight = 30
+barHeight = 10
 
 -- | Vertical gap between parent and child rows.
 rowGap :: Double
@@ -34,8 +34,8 @@ renderAt colorIndex iv =
       -- y = negate (fromIntegral depth * (barHeight + rowGap))
       y = negate (fromIntegral (depth) * (barHeight + rowGap))
       bar = roundedRect w barHeight 10 # fc (depthColour colorIndex) # lc black # lw thin
-      label = text (ivType iv) # fontSizeL 20 # fc black
-      labeledBar = ((label # translateX 0 # translateY (-5)) `atop` (bar))
+      label = text (ivType iv) # fontSizeL 6 # fc black
+      labeledBar = ((label # translateX 0 # translateY (0)) `atop` (bar))
             # svgAttr "onmouseover" "this.classList.add('highlight')"
             # svgAttr "onmouseout" "this.classList.remove('highlight')"
       piece = (p2 (x, y), labeledBar)
@@ -58,7 +58,7 @@ makeDiagram (IntervalDiagram {title, content}) = (l, titled)
 
 writeDiagram fn iD = do
   let (_ivs, dia) = makeDiagram iD
-      opts = SVGOptions (mkWidth 800) (Just cssDefs) (T.pack "") [] True
+      opts = SVGOptions absolute (Just cssDefs) (T.pack "") [] True
       svgElement = renderDia SVG opts dia
       path = "diagrams/" <> fn
   print (title iD, _ivs)

@@ -131,15 +131,19 @@ runServer base = do
   Warp.runSettings (Warp.setPort port $ Warp.setTimeout 0 Warp.defaultSettings) (app base chan)
 
 app :: String -> TChan TL.Text -> Wai.Application
-app base chan = WaiWS.websocketsOr WS.defaultConnectionOptions (wsApp base chan) httpApp
+app base chan = WaiWS.websocketsOr WS.defaultConnectionOptions (wsApp base chan) (httpApp base)
 
-httpApp :: Wai.Application
-httpApp req respond =
+httpApp :: String -> Wai.Application
+httpApp base req respond =
   case Wai.rawPathInfo req of
     "/" -> do
       html <- LBS.readFile "view.html"
       respond $ Wai.responseLBS status200
         [("Content-Type", "text/html; charset=utf-8")] html
+    "/diagram.svg" -> do
+      svg <- LBS.readFile ("diagrams/" ++ base ++ ".svg")
+      respond $ Wai.responseLBS status200
+        [("Content-Type", "image/svg+xml"), ("Cache-Control", "no-cache")] svg
     _   -> respond $ Wai.responseLBS status404
             [("Content-Type", "text/plain")] "404 Not Found"
 

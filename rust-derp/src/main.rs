@@ -9,7 +9,7 @@ fn run_with_rules(rules: &[types::Rule], intern: &sym::Interner, timeout: Durati
     let initial: HashSet<types::Tuple> = HashSet::new();
     let start = Instant::now();
     // We can't easily interrupt iter_rules, so we just time it
-    let result = core::iter_rules(initial, rules.to_vec(), intern);
+    let (result, _table) = core::iter_rules(initial, rules.to_vec(), intern);
     let elapsed = start.elapsed();
     if elapsed > timeout {
         Err(elapsed)
@@ -56,7 +56,7 @@ fn main() {
         bisect(&rules, &intern, Duration::from_secs(3));
     } else {
         let initial: HashSet<types::Tuple> = HashSet::new();
-        let result = core::iter_rules(initial, rules, &intern);
+        let (result, _table) = core::iter_rules(initial, rules, &intern);
 
         let base = filename.trim_end_matches(".derp");
         let json_path = format!("{}.json", base);

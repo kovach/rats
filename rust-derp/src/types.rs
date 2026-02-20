@@ -15,6 +15,7 @@ pub fn anum(n: i32) -> ATerm { Rc::new(Term::Num(n)) }
 pub fn ablank() -> ATerm { Rc::new(Term::Blank) }
 pub fn astr(s: Name) -> ATerm { Rc::new(Term::Str(s)) }
 pub fn aapp(cons: Name, args: Vec<ATerm>) -> ATerm { Rc::new(Term::App(cons, args)) }
+pub fn aid(id: u32) -> ATerm { Rc::new(Term::Id(id)) }
 pub fn aterm_ptr_eq(a: &ATerm, b: &ATerm) -> bool { Rc::ptr_eq(a, b) }
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Serialize)]
@@ -56,6 +57,7 @@ pub enum Term {
     Blank,
     App(Name, Vec<ATerm>),
     Str(Name),
+    Id(u32),
 }
 
 impl Serialize for Term {
@@ -99,6 +101,12 @@ impl Serialize for Term {
                 map.serialize_entry("value", value)?;
                 map.end()
             }
+            Term::Id(n) => {
+                let mut map = serializer.serialize_map(Some(2))?;
+                map.serialize_entry("tag", "id")?;
+                map.serialize_entry("id", n)?;
+                map.end()
+            }
         }
     }
 }
@@ -117,6 +125,7 @@ impl Term {
                 format!("{}({})", name.resolve(i), arg_strs.join(", "))
             }
             Term::Str(s) => format!("\"{}\"", s.resolve(i)),
+            Term::Id(n) => format!("#{}", n),
         }
     }
 
@@ -126,7 +135,7 @@ impl Term {
             Term::Var(VarOp::Name(s)) => Term::Var(VarOp::Name(Name::Str(s.resolve(i).to_owned()))),
             Term::Var(op) => panic!("cannot resolve_names on compiled VarOp: {:?}", op),
             Term::Pred(s) => Term::Pred(Name::Str(s.resolve(i).to_owned())),
-            Term::Num(_) | Term::Blank => self.clone(),
+            Term::Num(_) | Term::Blank | Term::Id(_) => self.clone(),
             Term::App(name, args) => {
                 let new_args = args.iter().map(|a| Rc::new(a.resolve_names(i))).collect();
                 Term::App(Name::Str(name.resolve(i).to_owned()), new_args)
@@ -143,7 +152,7 @@ impl Term {
             Term::Var(op) => panic!("cannot intern_names on compiled VarOp: {:?}", op),
             Term::Pred(Name::Str(s)) => Term::Pred(Name::Sym(i.intern(s))),
             Term::Pred(Name::Sym(_)) => self.clone(),
-            Term::Num(_) | Term::Blank => self.clone(),
+            Term::Num(_) | Term::Blank | Term::Id(_) => self.clone(),
             Term::App(name, args) => {
                 let new_name = match name {
                     Name::Str(s) => Name::Sym(i.intern(s)),
@@ -162,8 +171,48 @@ impl Term {
             Term::Var(VarOp::Name(n)) => vec![n.clone()],
             Term::Var(_) => panic!("vars() called on compiled term"),
             Term::App(_, args) => args.iter().flat_map(|a| a.vars()).collect(),
-            Term::Pred(_) | Term::Num(_) | Term::Blank | Term::Str(_) => vec![],
+            Term::Pred(_) | Term::Num(_) | Term::Blank | Term::Str(_) | Term::Id(_) => vec![],
         }
+    }
+}
+
+// -- TermTable ----------------------------------------------------------------
+
+/// Interning table for Term::App values. Stores flat Apps (args are non-App)
+/// and returns Term::Id handles for O(1) hashing.
+#[derive(Debug)]
+pub struct TermTable {
+    map: HashMap<(Name, Vec<ATerm>), u32>,
+    pub vec: Vec<ATerm>,  // index == id; entries are always Term::App
+}
+
+impl TermTable {
+    pub fn new() -> Self {
+        TermTable {
+            map: HashMap::new(),
+            vec: Vec::new(),
+        }
+    }
+
+    /// Intern a Term::App with the given constructor and (already-flat) args.
+    /// Returns Term::Id(id) for deduplication.
+    pub fn store(&mut self, cons: Name, args: Vec<ATerm>) -> ATerm {
+        let key = (cons, args);
+        if let Some(&id) = self.map.get(&key) {
+            return aid(id);
+        }
+        let id = self.vec.len() as u32;
+        self.vec.push(aapp(key.0.clone(), key.1.clone()));
+        self.map.insert(key, id);
+        aid(id)
+    }
+
+    pub fn get(&self, id: u32) -> &ATerm {
+        &self.vec[id as usize]
+    }
+
+    pub fn entries(&self) -> impl Iterator<Item = &ATerm> {
+        self.vec.iter()
     }
 }
 

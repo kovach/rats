@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
+use std::cell::RefCell;
 
 use crate::types::*;
 use crate::sym::{Sym, Interner};
@@ -87,13 +88,13 @@ pub fn optimize(ctx: &Binding, val: Expr) -> Expr {
     optimize_with(&mut ctx.bound_vars(), val)
 }
 
-pub fn eval_rule(rule: &Rule, ts: &Tuples, check: &Tuples) -> Vec<Vec<Tuple>> {
+pub fn eval_rule(rule: &Rule, ts: &Tuples, check: &Tuples, table: &mut TermTable) -> Vec<Vec<Tuple>> {
     let mut results = Vec::new();
     let mut slots = vec![ablank(); 30]; // TODO
-    for final_slots in eval_flat(&mut slots, &rule.body.val.flatten(), ts, check) {
+    for final_slots in eval_flat(&mut slots, &rule.body.val.flatten(), ts, check, table) {
         // Substitute head
         let head_tuples: Vec<Tuple> = rule.head.iter().map(|ht| {
-            sub_terms_compiled(&final_slots, ht)
+            sub_terms_compiled(&final_slots, ht, table)
         }).collect();
         results.push(head_tuples);
     }
@@ -155,7 +156,13 @@ fn compile_expr(expr: &Expr, seen: &mut HashMap<Sym, u16>, next_slot: &mut u16) 
 
 // -- Compiled expression evaluation -------------------------------------------
 
-fn match_term_compiled(slots: &mut Vec<ATerm>, pat: &ATerm, val: &ATerm) -> bool {
+fn match_term_compiled(slots: &mut Vec<ATerm>, pat: &ATerm, val: &ATerm, table: &TermTable) -> bool {
+    // Resolve Term::Id on the value side before matching
+    let resolved;
+    let val = match val.as_ref() {
+        Term::Id(n) => { resolved = table.get(*n).clone(); &resolved }
+        _ => val,
+    };
     match pat.as_ref() {
         Term::Var(VarOp::Set(i)) => {
             slots[*i as usize] = val.clone();
@@ -171,7 +178,7 @@ fn match_term_compiled(slots: &mut Vec<ATerm>, pat: &ATerm, val: &ATerm) -> bool
             match val.as_ref() {
                 Term::App(cons2, args2) if cons == cons2 && args.len() == args2.len() => {
                     for (cp, av) in args.iter().zip(args2.iter()) {
-                        if !match_term_compiled(slots, cp, av) {
+                        if !match_term_compiled(slots, cp, av, table) {
                             return false;
                         }
                     }
@@ -180,31 +187,33 @@ fn match_term_compiled(slots: &mut Vec<ATerm>, pat: &ATerm, val: &ATerm) -> bool
                 _ => false,
             }
         }
+        Term::Id(_) => panic!("match_term_compiled: Term::Id in pattern position"),
     }
 }
 
-fn match_terms_compiled(slots: &mut Vec<ATerm>, pats: &[ATerm], vals: &[ATerm]) -> bool {
+fn match_terms_compiled(slots: &mut Vec<ATerm>, pats: &[ATerm], vals: &[ATerm], table: &TermTable) -> bool {
     if pats.len() != vals.len() { return false; }
     for (p, v) in pats.iter().zip(vals.iter()) {
-        if !match_term_compiled(slots, p, v) { return false; }
+        if !match_term_compiled(slots, p, v, table) { return false; }
     }
     true
 }
 
-fn sub_term_compiled(slots: &[ATerm], t: &ATerm) -> ATerm {
+fn sub_term_compiled(slots: &[ATerm], t: &ATerm, table: &mut TermTable) -> ATerm {
     match t.as_ref() {
         Term::Var(VarOp::Set(i) | VarOp::Check(i)) => slots[*i as usize].clone(),
         Term::Var(VarOp::Name(_)) => panic!("sub_term_compiled: uncompiled VarOp::Name"),
         Term::App(cons, args) => {
-            let new_args: Vec<ATerm> = args.iter().map(|a| sub_term_compiled(slots, a)).collect();
-            aapp(cons.clone(), new_args)
+            let new_args: Vec<ATerm> = args.iter().map(|a| sub_term_compiled(slots, a, table)).collect();
+            table.store(cons.clone(), new_args)
         }
+        Term::Id(_) => t.clone(),  // already interned, pass through
         _ => t.clone(),  // Pred, Num, Blank, Str are unchanged
     }
 }
 
-fn sub_terms_compiled(slots: &[ATerm], ts: &[ATerm]) -> Tuple {
-    ts.iter().map(|t| sub_term_compiled(slots, t)).collect()
+fn sub_terms_compiled(slots: &[ATerm], ts: &[ATerm], table: &mut TermTable) -> Tuple {
+    ts.iter().map(|t| sub_term_compiled(slots, t, table)).collect()
 }
 
 fn eval_flat(
@@ -212,9 +221,10 @@ fn eval_flat(
     expr: &Vec<Expr>,
     tuples: &Tuples,
     check: &Tuples,
+    table: &mut TermTable,
 ) -> Vec<Vec<ATerm>> {
     let mut bs = vec![];
-    eval_flat0(0, slots, &expr, tuples, check, &mut bs);
+    eval_flat0(0, slots, &expr, tuples, check, &mut bs, table);
     bs
 }
 
@@ -224,7 +234,8 @@ fn eval_flat0(
     expr: &Vec<Expr>,
     tuples: &Tuples,
     check: &Tuples,
-    result: &mut Vec<Vec<ATerm>>
+    result: &mut Vec<Vec<ATerm>>,
+    table: &mut TermTable,
 ) {
     if idx == expr.len() {
         result.push(slots.clone());
@@ -239,37 +250,37 @@ fn eval_flat0(
             };
             let vs = &pat[1..];
             for stored_tuple in tuples.lookup(&pred) {
-                if match_terms_compiled(slots, vs, stored_tuple) {
-                    eval_flat0(idx+1, slots, expr, tuples, check, result);
+                if match_terms_compiled(slots, vs, stored_tuple, table) {
+                    eval_flat0(idx+1, slots, expr, tuples, check, result, table);
                 }
             }
         }
         Expr::Bind(x, y) => {
-            let y_sub = sub_term_compiled(slots, y);
+            let y_sub = sub_term_compiled(slots, y, table);
             match x.as_ref() {
                 Term::Var(VarOp::Set(i)) => {
                     slots[*i as usize] = y_sub;
-                    eval_flat0(idx+1, slots, expr, tuples, check, result);
+                    eval_flat0(idx+1, slots, expr, tuples, check, result, table);
                 }
                 Term::Var(VarOp::Check(i)) => {
                     if slots[*i as usize] == y_sub {
-                    eval_flat0(idx+1, slots, expr, tuples, check, result);
+                        eval_flat0(idx+1, slots, expr, tuples, check, result, table);
                     }
                 }
                 _ => {
-                    if match_term_compiled(slots, x, &y_sub) {
-                    eval_flat0(idx+1, slots, expr, tuples, check, result);
+                    if match_term_compiled(slots, x, &y_sub, table) {
+                        eval_flat0(idx+1, slots, expr, tuples, check, result, table);
                     }
                 }
             }
         }
         Expr::NegAtom(at) => {
-            let substituted: Tuple = sub_terms_compiled(slots, at);
+            let substituted: Tuple = sub_terms_compiled(slots, at, table);
             if !check.contains_tuple(&substituted) {
-                    eval_flat0(idx+1, slots, expr, tuples, check, result);
+                eval_flat0(idx+1, slots, expr, tuples, check, result, table);
             }
         }
-        Expr::Unit => eval_flat0(idx+1, slots, expr, tuples, check, result),
+        Expr::Unit => eval_flat0(idx+1, slots, expr, tuples, check, result, table),
         Expr::Join(_, _) => panic!(""),
     }
 }
@@ -391,7 +402,8 @@ pub fn eval_spec_entry(
     t: &Tuple,
     ts: &Tuples,
     check: &Tuples,
-    result: &mut Vec<Vec<Tuple>>
+    result: &mut Vec<Vec<Tuple>>,
+    table: &mut TermTable,
 ) {
     let mut slots = vec![ablank(); entry.num_slots as usize];
 
@@ -404,22 +416,23 @@ pub fn eval_spec_entry(
     let mut ok = true;
     let t_rest = &t[1..]; // skip pred
     for cpat in &entry.pats {
-        if !match_terms_compiled(&mut slots, cpat, t_rest) {
+        if !match_terms_compiled(&mut slots, cpat, t_rest, table) {
             ok = false;
             break;
         }
     }
     if ok {
         // Eval remaining
-        for final_slots in eval_flat(&mut slots, &entry.remaining.flatten(), ts, check) {
+        for final_slots in eval_flat(&mut slots, &entry.remaining.flatten(), ts, check, table) {
             // Substitute head
             let head_tuples: Vec<Tuple> = entry.head.iter().map(|ht| {
-                sub_terms_compiled(&final_slots, ht)
+                sub_terms_compiled(&final_slots, ht, table)
             }).collect();
             result.push(head_tuples);
         }
     }
 }
+
 /// Evaluate a compiled precomputed specialization against a concrete tuple.
 /// `t` is the full tuple (with pred at [0]).
 pub fn eval1_spec(
@@ -428,11 +441,12 @@ pub fn eval1_spec(
     ts: &Tuples,
     check: &Tuples,
     _intern: &Interner,
+    table: &mut TermTable,
 ) -> Vec<Vec<Tuple>> {
     let mut results = Vec::new();
 
     for entry in &spec.entries {
-        eval_spec_entry(entry, t, ts, check, &mut results);
+        eval_spec_entry(entry, t, ts, check, &mut results, table);
     }
     results
 }
@@ -511,21 +525,27 @@ pub fn alt_iter(
 
 // -- iter_rules --------------------------------------------------
 
-pub fn iter_rules(initial: HashSet<Tuple>, all_rules: Vec<Rule>, intern: &Interner) -> Tuples {
+pub fn iter_rules(initial: HashSet<Tuple>, all_rules: Vec<Rule>, intern: &Interner) -> (Tuples, TermTable) {
     let (start, specs) = prespecialize(all_rules);
+
+    let table = Rc::new(RefCell::new(TermTable::new()));
 
     let mut ts0 = initial;
     // Apply unit-body rules to get initial tuples
-    for rule in &start {
-        let mut ts = Vec::new();
-        eval_spec_entry(rule, &unit_tuple(), &Tuples::new(), &Tuples::new(), &mut ts);
-        for hts in ts {
-            for t in hts {
-                ts0.insert(t);
+    {
+        let mut tbl = table.borrow_mut();
+        for rule in &start {
+            let mut ts = Vec::new();
+            eval_spec_entry(rule, &unit_tuple(), &Tuples::new(), &Tuples::new(), &mut ts, &mut tbl);
+            for hts in ts {
+                for t in hts {
+                    ts0.insert(t);
+                }
             }
         }
     }
 
+    let table_clone = Rc::clone(&table);
     let f = move |t: &Tuple, old: &Tuples, check: &Tuples| -> Vec<Vec<Tuple>> {
         let pred = match t[0].as_ref() {
             Term::Pred(Name::Sym(sym)) => *sym,
@@ -533,9 +553,10 @@ pub fn iter_rules(initial: HashSet<Tuple>, all_rules: Vec<Rule>, intern: &Intern
         };
         match specs.get(&pred) {
             Some(spec_rules) => {
+                let mut tbl = table_clone.borrow_mut();
                 let mut results = Vec::new();
                 for spec_rule in spec_rules {
-                    results.extend(eval1_spec(spec_rule, t, old, check, intern));
+                    results.extend(eval1_spec(spec_rule, t, old, check, intern, &mut tbl));
                 }
                 results
             }
@@ -543,5 +564,53 @@ pub fn iter_rules(initial: HashSet<Tuple>, all_rules: Vec<Rule>, intern: &Intern
         }
     };
 
-    alt_iter(10, &ts0, &f, &Tuples::new())
+    let tuples = alt_iter(10, &ts0, &f, &Tuples::new());
+    drop(f);
+    let tbl = Rc::try_unwrap(table).unwrap().into_inner();
+    (tuples, tbl)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::parse;
+    use crate::sym::Interner;
+
+    fn run(src: &str) -> (Tuples, TermTable) {
+        let mut intern = Interner::new();
+        let rules = parse::parse(src, &mut intern).expect("parse");
+        iter_rules(HashSet::new(), rules, &intern)
+    }
+
+    /// Invariant 1: no Term::App appears in any output Tuple.
+    #[test]
+    fn test_no_app_in_tuples() {
+        let (tuples, _table) = run("-- foo pair(1, 2).");
+        for (_pred, set) in &tuples.relations {
+            for tuple in set {
+                for term in tuple {
+                    assert!(
+                        !matches!(term.as_ref(), Term::App(_, _)),
+                        "found Term::App in output tuple: {:?}", term
+                    );
+                }
+            }
+        }
+    }
+
+    /// Invariant 2: every TermTable entry has only non-App args (flat).
+    #[test]
+    fn test_table_keys_are_flat() {
+        let (_tuples, table) = run("-- foo bar(pair(triple(1,2),3)).");
+        for entry in table.entries() {
+            if let Term::App(_, args) = entry.as_ref() {
+                for arg in args {
+                    assert!(
+                        !matches!(arg.as_ref(), Term::App(_, _)),
+                        "found Term::App in TermTable entry args: {:?}", arg
+                    );
+                }
+            }
+        }
+    }
 }

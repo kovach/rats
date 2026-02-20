@@ -171,6 +171,8 @@ impl Term {
 
 pub type Tuple = SmallVec<[ATerm; 6]>;
 
+pub fn unit_tuple() -> Tuple { smallvec::smallvec![apred(Name::Str("".to_string()))] }
+
 pub fn pp_tuple(t: &Tuple, i: &Interner) -> String {
     t.iter().map(|term| term.pp(i)).collect::<Vec<_>>().join(" ")
 }
@@ -411,6 +413,20 @@ pub fn join(a: Expr, b: Expr) -> Expr {
     }
 }
 
+impl Expr {
+    pub fn flatten(self: &Expr) -> Vec<Expr> {
+        match self {
+            Expr::Join(a, b) => {
+                let mut v = a.flatten();
+                v.extend(b.flatten());
+                v
+            }
+            Expr::Unit => vec![],
+            other => vec![other.clone()],
+        }
+    }
+}
+
 // -- Closure and Rule ---------------------------------------------------------
 
 #[derive(Clone, PartialEq, Eq, Debug)]
@@ -438,8 +454,6 @@ pub struct SpecEntry {
     pub remaining: Expr,             // compiled remaining expression
     pub head: Vec<Tuple>,            // compiled head tuples for substitution
     pub num_slots: u16,              // total number of variable slots
-    pub base_ctx_len: u16,           // number of base_ctx entries (first N slots)
-    pub base_ctx: Binding,           // original base_ctx for initializing slots
 }
 
 #[derive(Clone, Debug)]

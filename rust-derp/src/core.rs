@@ -3,83 +3,8 @@ use std::rc::Rc;
 
 use crate::types::*;
 use crate::sym::{Sym, Interner};
-use crate::reset_binding;
-
-// -- Unification --------------------------------------------------------------
-
-/// Unify a pattern term against a value term
-pub fn unify_term(b: &mut Binding, pat: &ATerm, val: &ATerm) -> bool {
-    match (pat.as_ref(), val.as_ref()) {
-        (Term::Blank, _) | (_, Term::Blank) => true,
-        (Term::Var(VarOp::Name(var)), _) => b.try_extend(var.as_sym(), val),
-        (Term::Var(_), _) => panic!("unify_term: compiled VarOp in uncompiled path"),
-        (Term::Pred(_), _) => {
-            pat == val
-        }
-        (Term::Num(_), _) => {
-            pat == val
-        }
-        (Term::Str(_), _) => {
-            pat == val
-        }
-        (Term::App(cons1, ts1), Term::App(cons2, ts2)) => {
-            if cons1 != cons2 {
-                return false
-            }
-            unify_tuples(b, ts1, ts2)
-        }
-        (Term::App(..), _) => false,
-    }
-}
-
-/// Unify two slices of ATerms element-wise
-pub fn unify_tuples(b: &mut Binding, ts1: &[ATerm], ts2: &[ATerm]) -> bool {
-    if ts1.len() != ts2.len() {
-        return false;
-    }
-    for (t, v) in ts1.iter().zip(ts2.iter()) {
-        if !unify_term(b, t, v) { return false; }
-    }
-    true
-}
-
-// -- Substitution -------------------------------------------------------------
-
-pub fn sub_term(ctx: &Binding, t: &ATerm) -> ATerm {
-    match t.as_ref() {
-        Term::Var(VarOp::Name(n)) => ctx.lookup(n.as_sym()).expect("unbound variable").clone(),
-        Term::Var(_) => panic!("sub_term: compiled VarOp in uncompiled path"),
-        Term::App(cons, args) => {
-            let new_args: Vec<ATerm> = args.iter().map(|a| sub_term(ctx, a)).collect();
-            // If nothing changed, reuse original term (zero allocation)
-            if new_args.iter().zip(args.iter()).all(|(a, b)| aterm_ptr_eq(a, b)) {
-                t.clone()
-            } else {
-                aapp(cons.clone(), new_args)
-            }
-        }
-        Term::Blank => panic!("cannot substitute blank"),
-        _ => t.clone(),
-    }
-}
-
-pub fn subst(ctx: &Binding, tuple: &Tuple) -> Tuple {
-    tuple.iter().map(|t| sub_term(ctx, t)).collect()
-}
-
-pub fn substs(ctx: &Binding, tuples: &[Tuple]) -> Vec<Tuple> {
-    tuples.iter().map(|t| subst(ctx, t)).collect()
-}
 
 // -- Expression helpers -------------------------------------------------------
-
-pub fn is_immediate(e: &Expr) -> bool {
-    match e {
-        Expr::Unit | Expr::Bind(..) => true,
-        Expr::Join(a, b) => is_immediate(a) && is_immediate(b),
-        Expr::Atom(..) | Expr::NegAtom(..) => false,
-    }
-}
 
 pub fn atom(t: Tuple) -> Expr {
     if t.is_empty() {
@@ -162,118 +87,15 @@ pub fn optimize(ctx: &Binding, val: Expr) -> Expr {
     optimize_with(&mut ctx.bound_vars(), val)
 }
 
-// -- Eval ---------------------------------------------------------------------
-
-pub fn eval_(ctx : &mut Binding, val: &Expr, tuples: &Tuples, check: &Tuples, intern: &crate::sym::Interner,
-             k: &mut dyn FnMut(&mut Binding) ) {
-    match val {
-        Expr::Unit => k(ctx),
-        Expr::Bind(x, y) => {
-            let y_sub = sub_term(ctx, y);
-            reset_binding!(ctx,
-                if unify_term(ctx, x, &y_sub) {
-                    k(ctx);
-                }
-            );
-        }
-        Expr::Atom(pat) => {
-            if pat.is_empty() {
-                panic!("empty atom in eval");
-            }
-            match pat[0].as_ref() {
-                Term::Pred(Name::Sym(sym)) => {
-                    let vs = &pat[1..];
-                    for stored_tuple in tuples.lookup(sym) {
-                        reset_binding!(ctx,
-                            if unify_tuples(ctx, vs, stored_tuple) {
-                                k(ctx);
-                            }
-                        );
-                    }
-                }
-                Term::Pred(Name::Str(pred_str)) => {
-                    if pred_str.starts_with('#') {
-                        let op_name = &pred_str[1..];
-                        // todo check this
-                        for c in eval_builtin_str(ctx, op_name, &pat[1..], intern).iter_mut() {
-                            k(c);
-                        }
-                    }
-                    panic!("non-interned string: {}", pred_str);
-                }
-                _ => panic!("atom must start with Pred. saw: {:?}", *pat),
-            }
-        }
-        Expr::NegAtom(at) => {
-            let substituted = subst(ctx, at);
-            if matches!(substituted[0].as_ref(), Term::Blank) {
-                panic!("negatom substituted to blank pred");
-            }
-            if !check.contains_tuple(&substituted) {
-                k(ctx);
-            }
-        }
-        Expr::Join(a, b) => {
-            eval_(ctx, &a, tuples, check, intern, &mut |c2| {
-                eval_(c2, &b, tuples, check, intern, &mut |c3| {
-                    k(c3);
-                });
-            });
-        }
-    }
-}
-pub fn eval(cl: &Closure, tuples: &Tuples, check: &Tuples, intern: &crate::sym::Interner) -> Vec<Binding> {
-    let mut result = Vec::new();
-    eval_(&mut cl.ctx.clone(), &cl.val, tuples, check, intern, &mut |t| { result.push(t.clone()) });
-    result
-}
-
-fn eval_builtin_str(b: &Binding, op: &str, args: &[ATerm], intern: &crate::sym::Interner) -> Vec<Binding> {
-    match op {
-        "range" => {
-            // evalBuiltin b "range" [_, t, TermNum lo, TermNum hi]
-            if args.len() != 4 { panic!("range expects 4 args, got {}", args.len()); }
-            let t = &args[1];
-            let lo = match args[2].as_ref() { Term::Num(n) => *n, _ => panic!("range: lo must be num") };
-            let hi = match args[3].as_ref() { Term::Num(n) => *n, _ => panic!("range: hi must be num") };
-            let mut results = Vec::new();
-            for i in lo..=hi {
-                let num = anum(i);
-                let mut b2 = b.clone();
-                if unify_term(&mut b2, t, &num) {
-                    results.push(b2);
-                }
-            }
-            results
-        }
-        "lt" => {
-            if args.len() != 2 { panic!("lt expects 2 args"); }
-            let a = sub_term(b, &args[0]);
-            let bterm = sub_term(b, &args[1]);
-            fn chk_str(bd: &Binding, a: &ATerm, bt: &ATerm, intern: &crate::sym::Interner) -> Vec<Binding> {
-                match (a.as_ref(), bt.as_ref()) {
-                    (_, Term::App(cons, _)) if cons.resolve(intern) == "z" => vec![],
-                    (Term::App(cons, _), _) if cons.resolve(intern) == "z" => vec![bd.clone()],
-                    (Term::App(sc, ts), Term::App(sc2, ts2))
-                        if sc.resolve(intern) == "s" && sc2.resolve(intern) == "s" =>
-                    {
-                        chk_str(bd, &ts[0], &ts2[0], intern)
-                    }
-                    _ => panic!("lt: unexpected terms"),
-                }
-            }
-            chk_str(b, &a, &bterm, intern)
-        }
-        _ => panic!("unimplemented builtin: #{}", op),
-    }
-}
-
-// -- eval1, stepRule, evalRule -------------------------------------------------
-
-pub fn eval_rule(rule: &Rule, ts: &Tuples, check: &Tuples, intern: &crate::sym::Interner) -> Vec<Vec<Tuple>> {
+pub fn eval_rule(rule: &Rule, ts: &Tuples, check: &Tuples) -> Vec<Vec<Tuple>> {
     let mut results = Vec::new();
-    for b in eval(&rule.body, ts, check, intern) {
-        results.push(substs(&b, &rule.head));
+    let mut slots = vec![ablank(); 30]; // TODO
+    for final_slots in eval_flat(&mut slots, &rule.body.val.flatten(), ts, check) {
+        // Substitute head
+        let head_tuples: Vec<Tuple> = rule.head.iter().map(|ht| {
+            sub_terms_compiled(&final_slots, ht)
+        }).collect();
+        results.push(head_tuples);
     }
     results
 }
@@ -385,34 +207,31 @@ fn sub_terms_compiled(slots: &[ATerm], ts: &[ATerm]) -> Tuple {
     ts.iter().map(|t| sub_term_compiled(slots, t)).collect()
 }
 
-fn eval_compiled(
+fn eval_flat(
     slots: &mut Vec<ATerm>,
-    expr: &Expr,
+    expr: &Vec<Expr>,
     tuples: &Tuples,
     check: &Tuples,
-    k: &mut dyn FnMut(&mut Vec<ATerm>),
+) -> Vec<Vec<ATerm>> {
+    let mut bs = vec![];
+    eval_flat0(0, slots, &expr, tuples, check, &mut bs);
+    bs
+}
+
+fn eval_flat0(
+    idx: usize,
+    slots: &mut Vec<ATerm>,
+    expr: &Vec<Expr>,
+    tuples: &Tuples,
+    check: &Tuples,
+    result: &mut Vec<Vec<ATerm>>
 ) {
-    match expr {
-        Expr::Unit => k(slots),
-        Expr::Bind(x, y) => {
-            let y_sub = sub_term_compiled(slots, y);
-            match x.as_ref() {
-                Term::Var(VarOp::Set(i)) => {
-                    slots[*i as usize] = y_sub;
-                    k(slots);
-                }
-                Term::Var(VarOp::Check(i)) => {
-                    if slots[*i as usize] == y_sub {
-                        k(slots);
-                    }
-                }
-                _ => {
-                    if match_term_compiled(slots, x, &y_sub) {
-                        k(slots);
-                    }
-                }
-            }
-        }
+    if idx == expr.len() {
+        result.push(slots.clone());
+        return;
+    }
+
+    match &expr[idx] {
         Expr::Atom(pat) => {
             let pred = match pat[0].as_ref() {
                 Term::Pred(Name::Sym(s)) => *s,
@@ -421,21 +240,37 @@ fn eval_compiled(
             let vs = &pat[1..];
             for stored_tuple in tuples.lookup(&pred) {
                 if match_terms_compiled(slots, vs, stored_tuple) {
-                    k(slots);
+                    eval_flat0(idx+1, slots, expr, tuples, check, result);
+                }
+            }
+        }
+        Expr::Bind(x, y) => {
+            let y_sub = sub_term_compiled(slots, y);
+            match x.as_ref() {
+                Term::Var(VarOp::Set(i)) => {
+                    slots[*i as usize] = y_sub;
+                    eval_flat0(idx+1, slots, expr, tuples, check, result);
+                }
+                Term::Var(VarOp::Check(i)) => {
+                    if slots[*i as usize] == y_sub {
+                    eval_flat0(idx+1, slots, expr, tuples, check, result);
+                    }
+                }
+                _ => {
+                    if match_term_compiled(slots, x, &y_sub) {
+                    eval_flat0(idx+1, slots, expr, tuples, check, result);
+                    }
                 }
             }
         }
         Expr::NegAtom(at) => {
             let substituted: Tuple = sub_terms_compiled(slots, at);
             if !check.contains_tuple(&substituted) {
-                k(slots);
+                    eval_flat0(idx+1, slots, expr, tuples, check, result);
             }
         }
-        Expr::Join(a, b) => {
-            eval_compiled(slots, a, tuples, check, &mut |slots2| {
-                eval_compiled(slots2, b, tuples, check, k);
-            });
-        }
+        Expr::Unit => eval_flat0(idx+1, slots, expr, tuples, check, result),
+        Expr::Join(_, _) => panic!(""),
     }
 }
 
@@ -482,60 +317,109 @@ fn collect_extractions(
 
 /// Build precomputed specializations for all non-immediate rules.
 /// Returns a map from predicate Sym to the list of SpecializedRules that match it.
-pub fn prespecialize(rules: &[&Rule]) -> HashMap<Sym, Vec<SpecializedRule>> {
+pub fn prespecialize(rules: Vec<Rule>) -> (Vec<SpecEntry>, HashMap<Sym, Vec<SpecializedRule>>) {
     let mut result: HashMap<Sym, Vec<SpecializedRule>> = HashMap::new();
+    let mut immediate = Vec::new();
 
     for rule in rules {
         let preds = atom_predicates(&rule.body.val);
-        for (pred_sym, _arity) in preds {
-            let mut extractions: Vec<(Vec<Tuple>, Expr)> = Vec::new();
-            collect_extractions(&rule.body.val, pred_sym, &mut |pats, remaining| {
-                extractions.push((pats, remaining));
+        if preds.len() == 0 {
+            let mut seen: HashMap<Sym, u16> = HashMap::new();
+            let mut next_slot: u16 = 0;
+            let body2 = compile_expr(&rule.body.val, &mut seen, &mut next_slot);
+            let chead: Vec<Tuple> = rule.head.iter().map(|tuple| {
+                compile_tuple(tuple, &mut seen, &mut next_slot)
+            }).collect();
+            immediate.push(SpecEntry {
+                pats: vec![],
+                remaining: body2,
+                num_slots: next_slot,
+                head: chead,
             });
+        } else {
+            for (pred_sym, _arity) in preds {
+                let mut extractions: Vec<(Vec<Tuple>, Expr)> = Vec::new();
+                collect_extractions(&rule.body.val, pred_sym, &mut |pats, remaining| {
+                    extractions.push((pats, remaining));
+                });
 
-            if !extractions.is_empty() {
-                let mut final_entries = Vec::new();
-                for (pats, remaining) in &extractions {
-                    let mut seen: HashMap<Sym, u16> = HashMap::new();
-                    let mut next_slot: u16 = 0;
+                if !extractions.is_empty() {
+                    let mut final_entries = Vec::new();
+                    for (pats, remaining) in &extractions {
+                        let mut seen: HashMap<Sym, u16> = HashMap::new();
+                        let mut next_slot: u16 = 0;
 
-                    for (sym, _) in &rule.body.ctx.entries {
-                        if !seen.contains_key(sym) {
-                            seen.insert(*sym, next_slot);
-                            next_slot += 1;
+                        // TODO remove
+                        for (sym, _) in &rule.body.ctx.entries {
+                            if !seen.contains_key(sym) {
+                                seen.insert(*sym, next_slot);
+                                next_slot += 1;
+                            }
                         }
+
+                        let mut cpats = Vec::new();
+                        for pat in pats {
+                            cpats.push(compile_tuple(&pat[1..], &mut seen, &mut next_slot));
+                        }
+
+                        let cremaining = compile_expr(remaining, &mut seen, &mut next_slot);
+
+                        let chead: Vec<Tuple> = rule.head.iter().map(|tuple| {
+                            compile_tuple(tuple, &mut seen, &mut next_slot)
+                        }).collect();
+
+                        final_entries.push(SpecEntry {
+                            pats: cpats,
+                            remaining: cremaining,
+                            num_slots: next_slot,
+                            head: chead,
+                        });
                     }
 
-                    let mut cpats = Vec::new();
-                    for pat in pats {
-                        cpats.push(compile_tuple(&pat[1..], &mut seen, &mut next_slot));
-                    }
-
-                    let cremaining = compile_expr(remaining, &mut seen, &mut next_slot);
-
-                    let chead: Vec<Tuple> = rule.head.iter().map(|tuple| {
-                        compile_tuple(tuple, &mut seen, &mut next_slot)
-                    }).collect();
-
-                    final_entries.push(SpecEntry {
-                        pats: cpats,
-                        remaining: cremaining,
-                        num_slots: next_slot,
-                        head: chead,
-                        base_ctx_len: rule.body.ctx.entries.len() as u16,
-                        base_ctx: rule.body.ctx.clone(),
+                    result.entry(pred_sym).or_default().push(SpecializedRule {
+                        entries: final_entries,
                     });
                 }
-
-                result.entry(pred_sym).or_default().push(SpecializedRule {
-                    entries: final_entries,
-                });
             }
         }
     }
-    result
+    (immediate, result)
 }
 
+pub fn eval_spec_entry(
+    entry: &SpecEntry,
+    t: &Tuple,
+    ts: &Tuples,
+    check: &Tuples,
+    result: &mut Vec<Vec<Tuple>>
+) {
+    let mut slots = vec![ablank(); entry.num_slots as usize];
+
+    // Initialize slots from base_ctx
+    // for (i, (_, val)) in entry.base_ctx.entries.iter().enumerate() {
+    //     slots[i] = val.clone();
+    // }
+
+    // Match each compiled pat against the tuple (without pred)
+    let mut ok = true;
+    let t_rest = &t[1..]; // skip pred
+    for cpat in &entry.pats {
+        if !match_terms_compiled(&mut slots, cpat, t_rest) {
+            ok = false;
+            break;
+        }
+    }
+    if ok {
+        // Eval remaining
+        for final_slots in eval_flat(&mut slots, &entry.remaining.flatten(), ts, check) {
+            // Substitute head
+            let head_tuples: Vec<Tuple> = entry.head.iter().map(|ht| {
+                sub_terms_compiled(&final_slots, ht)
+            }).collect();
+            result.push(head_tuples);
+        }
+    }
+}
 /// Evaluate a compiled precomputed specialization against a concrete tuple.
 /// `t` is the full tuple (with pred at [0]).
 pub fn eval1_spec(
@@ -546,34 +430,9 @@ pub fn eval1_spec(
     _intern: &Interner,
 ) -> Vec<Vec<Tuple>> {
     let mut results = Vec::new();
-    let t_rest = &t[1..]; // skip pred
 
     for entry in &spec.entries {
-        let mut slots = vec![ablank(); entry.num_slots as usize];
-
-        // Initialize slots from base_ctx
-        for (i, (_, val)) in entry.base_ctx.entries.iter().enumerate() {
-            slots[i] = val.clone();
-        }
-
-        // Match each compiled pat against the tuple (without pred)
-        let mut ok = true;
-        for cpat in &entry.pats {
-            if !match_terms_compiled(&mut slots, cpat, t_rest) {
-                ok = false;
-                break;
-            }
-        }
-        if !ok { continue; }
-
-        // Eval remaining
-        eval_compiled(&mut slots, &entry.remaining, ts, check, &mut |final_slots| {
-            // Substitute head
-            let head_tuples: Vec<Tuple> = entry.head.iter().map(|ht| {
-                sub_terms_compiled(final_slots, ht)
-            }).collect();
-            results.push(head_tuples);
-        });
+        eval_spec_entry(entry, t, ts, check, &mut results);
     }
     results
 }
@@ -652,20 +511,20 @@ pub fn alt_iter(
 
 // -- iter_rules --------------------------------------------------
 
-pub fn iter_rules(initial: HashSet<Tuple>, all_rules: &[Rule], intern: &Interner) -> Tuples {
-    let (start, rest): (Vec<&Rule>, Vec<&Rule>) = all_rules.iter().partition(|r| is_immediate(&r.body.val));
+pub fn iter_rules(initial: HashSet<Tuple>, all_rules: Vec<Rule>, intern: &Interner) -> Tuples {
+    let (start, specs) = prespecialize(all_rules);
 
     let mut ts0 = initial;
     // Apply unit-body rules to get initial tuples
     for rule in &start {
-        for head_tuples in eval_rule(rule, &Tuples::new(), &Tuples::new(), intern) {
-            for t in head_tuples {
+        let mut ts = Vec::new();
+        eval_spec_entry(rule, &unit_tuple(), &Tuples::new(), &Tuples::new(), &mut ts);
+        for hts in ts {
+            for t in hts {
                 ts0.insert(t);
             }
         }
     }
-
-    let specs = prespecialize(&rest);
 
     let f = move |t: &Tuple, old: &Tuples, check: &Tuples| -> Vec<Vec<Tuple>> {
         let pred = match t[0].as_ref() {

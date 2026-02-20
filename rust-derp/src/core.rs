@@ -157,12 +157,6 @@ fn compile_expr(expr: &Expr, seen: &mut HashMap<Sym, u16>, next_slot: &mut u16) 
 // -- Compiled expression evaluation -------------------------------------------
 
 fn match_term_compiled(slots: &mut Vec<ATerm>, pat: &ATerm, val: &ATerm, table: &TermTable) -> bool {
-    // Resolve Term::Id on the value side before matching
-    let resolved;
-    let val = match val.as_ref() {
-        Term::Id(n) => { resolved = table.get(*n).clone(); &resolved }
-        _ => val,
-    };
     match pat.as_ref() {
         Term::Var(VarOp::Set(i)) => {
             slots[*i as usize] = val.clone();
@@ -175,7 +169,12 @@ fn match_term_compiled(slots: &mut Vec<ATerm>, pat: &ATerm, val: &ATerm, table: 
         Term::Str(n) => matches!(val.as_ref(), Term::Str(n2) if n == n2),
         Term::Blank => true,
         Term::App(cons, args) => {
-            match val.as_ref() {
+            let val_unfolded = match val.as_ref() {
+                Term::Id(n) => { table.get(*n) }
+                Term::App(_,_) => panic!(),
+                _ => val,
+            };
+            match val_unfolded.as_ref() {
                 Term::App(cons2, args2) if cons == cons2 && args.len() == args2.len() => {
                     for (cp, av) in args.iter().zip(args2.iter()) {
                         if !match_term_compiled(slots, cp, av, table) {

@@ -359,6 +359,23 @@ impl Tuples {
         format!("-- {}.", parts.join(",\n   "))
     }
 
+    pub fn pp_derp_with_table(&self, i: &Interner, table: &TermTable) -> String {
+        let mut parts: Vec<String> = Vec::new();
+        let mut preds: Vec<_> = self.relations.iter().collect();
+        preds.sort_by_key(|(p, _)| i.resolve(**p));
+        for (pred, tuples) in preds {
+            let mut sorted_tuples: Vec<_> = tuples.iter().collect();
+            sorted_tuples.sort();
+            for t in sorted_tuples {
+                let mut full: Tuple = SmallVec::new();
+                full.push(apred(Name::Sym(*pred)));
+                full.extend(t.iter().map(|term| Rc::new(term.expand_ids(table))));
+                parts.push(pp_tuple(&full, i));
+            }
+        }
+        format!("-- {}.", parts.join(",\n   "))
+    }
+
     pub fn to_json(&self, i: &Interner) -> String {
         use serde_json::{Map, Value};
         let mut map = Map::new();

@@ -63,7 +63,7 @@ fn main() {
         let derp_path = format!("{}.out.derp", base);
 
         fs::write(&json_path, result.to_json_with_table(&intern, &table)).expect("could not write json");
-        fs::write(&derp_path, result.pp_derp(&intern)).expect("could not write derp");
+        fs::write(&derp_path, result.pp_derp_with_table(&intern, &table)).expect("could not write derp");
 
         eprintln!("{} tuples, wrote {} and {}", result.size(), json_path, derp_path);
     }

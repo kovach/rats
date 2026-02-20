@@ -56,13 +56,13 @@ fn main() {
         bisect(&rules, &intern, Duration::from_secs(3));
     } else {
         let initial: HashSet<types::Tuple> = HashSet::new();
-        let (result, _table) = core::iter_rules(initial, rules, &intern);
+        let (result, table) = core::iter_rules(initial, rules, &intern);
 
         let base = filename.trim_end_matches(".derp");
         let json_path = format!("{}.json", base);
         let derp_path = format!("{}.out.derp", base);
 
-        fs::write(&json_path, result.to_json(&intern)).expect("could not write json");
+        fs::write(&json_path, result.to_json_with_table(&intern, &table)).expect("could not write json");
         fs::write(&derp_path, result.pp_derp(&intern)).expect("could not write derp");
 
         eprintln!("{} tuples, wrote {} and {}", result.size(), json_path, derp_path);

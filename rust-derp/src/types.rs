@@ -166,6 +166,18 @@ impl Term {
         }
     }
 
+    /// Recursively expand all Term::Id references back to Term::App using the table.
+    pub fn expand_ids(&self, table: &TermTable) -> Term {
+        match self {
+            Term::Id(n) => table.get(*n).expand_ids(table),
+            Term::App(cons, args) => {
+                let new_args = args.iter().map(|a| Rc::new(a.expand_ids(table))).collect();
+                Term::App(cons.clone(), new_args)
+            }
+            other => other.clone(),
+        }
+    }
+
     pub fn vars(&self) -> Vec<Name> {
         match self {
             Term::Var(VarOp::Name(n)) => vec![n.clone()],
@@ -358,6 +370,28 @@ impl Tuples {
             let json_tuples: Vec<Value> = sorted_tuples.iter().map(|t| {
                 let terms: Vec<Value> = t.iter().map(|term| {
                     let resolved = term.resolve_names(i);
+                    serde_json::to_value(&resolved).expect("serialize term")
+                }).collect();
+                Value::Array(terms)
+            }).collect();
+            map.insert(i.resolve(*pred).to_owned(), Value::Array(json_tuples));
+        }
+        serde_json::to_string(&map).expect("serialize tuples")
+    }
+
+    /// Like to_json, but expands Term::Id references via the TermTable before serializing.
+    pub fn to_json_with_table(&self, i: &Interner, table: &TermTable) -> String {
+        use serde_json::{Map, Value};
+        let mut map = Map::new();
+        let mut preds: Vec<_> = self.relations.iter().collect();
+        preds.sort_by_key(|(p, _)| i.resolve(**p));
+        for (pred, tuples) in preds {
+            let mut sorted_tuples: Vec<_> = tuples.iter().collect();
+            sorted_tuples.sort();
+            let json_tuples: Vec<Value> = sorted_tuples.iter().map(|t| {
+                let terms: Vec<Value> = t.iter().map(|term| {
+                    let expanded = term.expand_ids(table);
+                    let resolved = expanded.resolve_names(i);
                     serde_json::to_value(&resolved).expect("serialize term")
                 }).collect();
                 Value::Array(terms)

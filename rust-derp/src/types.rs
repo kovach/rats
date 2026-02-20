@@ -9,7 +9,7 @@ use crate::sym::{Sym, Interner};
 
 pub type ATerm = Rc<Term>;
 
-pub fn avar(s: Name) -> ATerm { Rc::new(Term::Var(s)) }
+pub fn avar(s: Name) -> ATerm { Rc::new(Term::Var(VarOp::Name(s))) }
 pub fn apred(s: Name) -> ATerm { Rc::new(Term::Pred(s)) }
 pub fn anum(n: i32) -> ATerm { Rc::new(Term::Num(n)) }
 pub fn ablank() -> ATerm { Rc::new(Term::Blank) }
@@ -42,8 +42,15 @@ impl Name {
 }
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+pub enum VarOp {
+    Name(Name),  // uncompiled variable
+    Set(u16),    // first occurrence — write to slot unconditionally
+    Check(u16),  // later occurrence — compare slot value for equality
+}
+
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub enum Term {
-    Var(Name),
+    Var(VarOp),
     Pred(Name),
     Num(i32),
     Blank,
@@ -55,12 +62,13 @@ impl Serialize for Term {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         use serde::ser::SerializeMap;
         match self {
-            Term::Var(name) => {
+            Term::Var(VarOp::Name(name)) => {
                 let mut map = serializer.serialize_map(Some(2))?;
                 map.serialize_entry("tag", "var")?;
                 map.serialize_entry("name", name)?;
                 map.end()
             }
+            Term::Var(op) => panic!("cannot serialize compiled VarOp: {:?}", op),
             Term::Pred(name) => {
                 let mut map = serializer.serialize_map(Some(2))?;
                 map.serialize_entry("tag", "pred")?;
@@ -98,7 +106,9 @@ impl Serialize for Term {
 impl Term {
     pub fn pp(&self, i: &Interner) -> String {
         match self {
-            Term::Var(s) => s.resolve(i).to_owned(),
+            Term::Var(VarOp::Name(s)) => s.resolve(i).to_owned(),
+            Term::Var(VarOp::Set(n)) => format!("${}", n),
+            Term::Var(VarOp::Check(n)) => format!("${}?", n),
             Term::Pred(s) => s.resolve(i).to_owned(),
             Term::Num(n) => n.to_string(),
             Term::Blank => "_".to_owned(),
@@ -113,7 +123,8 @@ impl Term {
     /// Resolve all Name::Sym → Name::Str using the interner.
     pub fn resolve_names(&self, i: &Interner) -> Term {
         match self {
-            Term::Var(s) => Term::Var(Name::Str(s.resolve(i).to_owned())),
+            Term::Var(VarOp::Name(s)) => Term::Var(VarOp::Name(Name::Str(s.resolve(i).to_owned()))),
+            Term::Var(op) => panic!("cannot resolve_names on compiled VarOp: {:?}", op),
             Term::Pred(s) => Term::Pred(Name::Str(s.resolve(i).to_owned())),
             Term::Num(_) | Term::Blank => self.clone(),
             Term::App(name, args) => {
@@ -127,10 +138,11 @@ impl Term {
     /// Intern all Name::Str → Name::Sym using the interner.
     pub fn intern_names(&self, i: &mut Interner) -> Term {
         match self {
-            Term::Var(Name::Str(s)) => Term::Var(Name::Sym(i.intern(s))),
-            Term::Var(n @ Name::Sym(_)) => Term::Var(n.clone()),
+            Term::Var(VarOp::Name(Name::Str(s))) => Term::Var(VarOp::Name(Name::Sym(i.intern(s)))),
+            Term::Var(VarOp::Name(Name::Sym(_))) => self.clone(),
+            Term::Var(op) => panic!("cannot intern_names on compiled VarOp: {:?}", op),
             Term::Pred(Name::Str(s)) => Term::Pred(Name::Sym(i.intern(s))),
-            Term::Pred(n @ Name::Sym(_)) => Term::Pred(n.clone()),
+            Term::Pred(Name::Sym(_)) => self.clone(),
             Term::Num(_) | Term::Blank => self.clone(),
             Term::App(name, args) => {
                 let new_name = match name {
@@ -141,13 +153,14 @@ impl Term {
                 Term::App(new_name, new_args)
             }
             Term::Str(Name::Str(s)) => Term::Str(Name::Sym(i.intern(s))),
-            Term::Str(n @ Name::Sym(_)) => Term::Str(n.clone()),
+            Term::Str(Name::Sym(_)) => self.clone(),
         }
     }
 
     pub fn vars(&self) -> Vec<Name> {
         match self {
-            Term::Var(n) => vec![n.clone()],
+            Term::Var(VarOp::Name(n)) => vec![n.clone()],
+            Term::Var(_) => panic!("vars() called on compiled term"),
             Term::App(_, args) => args.iter().flat_map(|a| a.vars()).collect(),
             Term::Pred(_) | Term::Num(_) | Term::Blank | Term::Str(_) => vec![],
         }
@@ -421,57 +434,15 @@ pub struct Rule {
 /// `remaining` is the expression left after removing those atoms.
 #[derive(Clone, Debug)]
 pub struct SpecEntry {
-    pub pats: Vec<Tuple>,
-    pub remaining: Expr,
-}
-
-#[derive(Clone, Debug)]
-pub struct SpecializedRule {
-    pub entries: Vec<SpecEntry>,
-    pub base_ctx: Binding,
-    pub head: Vec<Tuple>,
-}
-
-// -- Compiled expression types ------------------------------------------------
-
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum VarOp {
-    Set(u16),    // first occurrence — write to slot unconditionally
-    Check(u16),  // later occurrence — compare slot value for equality
-}
-
-#[derive(Clone, PartialEq, Eq, Debug)]
-pub enum CTerm {
-    Var(VarOp),
-    Pred(Name),
-    Num(i32),
-    Blank,
-    App(Name, Vec<CTerm>),
-    Str(Name),
-}
-
-#[derive(Clone, PartialEq, Eq, Debug)]
-pub enum CExpr {
-    Atom(Sym, Vec<CTerm>),
-    NegAtom(Vec<CTerm>),
-    Bind(CTerm, CTerm),
-    Join(Box<CExpr>, Box<CExpr>),
-    Unit,
-}
-
-/// Compiled version of SpecEntry — self-contained with all data needed for eval
-#[derive(Clone, Debug)]
-pub struct CSpecEntry {
-    pub pats: Vec<Vec<CTerm>>,       // compiled atom patterns (each without the pred)
-    pub remaining: CExpr,            // compiled remaining expression
-    pub head: Vec<Vec<CTerm>>,       // compiled head tuples for substitution
+    pub pats: Vec<Tuple>,            // compiled atom patterns (each without the pred)
+    pub remaining: Expr,             // compiled remaining expression
+    pub head: Vec<Tuple>,            // compiled head tuples for substitution
     pub num_slots: u16,              // total number of variable slots
     pub base_ctx_len: u16,           // number of base_ctx entries (first N slots)
     pub base_ctx: Binding,           // original base_ctx for initializing slots
 }
 
-/// Compiled version of SpecializedRule
 #[derive(Clone, Debug)]
-pub struct CSpecializedRule {
-    pub entries: Vec<CSpecEntry>,
+pub struct SpecializedRule {
+    pub entries: Vec<SpecEntry>,
 }

@@ -56,8 +56,9 @@ termCompile = \case
   v@TermBlank -> pp v
 termsCompile = map termCompile
 idCompile (Id n vs) = cons "id" [show n, toBinding vs]
-toBinding [] = cons "nil" []
-toBinding (t:ts) = cons "bind" [pp t, toBinding ts]
+toBinding ts = cons "bind" (map pp ts)
+--toBinding [] = cons "nil" []
+--toBinding (t:ts) = cons "bind" [pp t, toBinding ts]
 tCompile = \case
   L t -> cons "l" [termCompile t]
   R t -> cons "r" [termCompile t]

@@ -34,7 +34,8 @@ main = do
         (f:_) -> f
         []    -> error "usage: rats <file.turn>"
       base = fromMaybe filename (stripSuffix ".turn" filename)
-  runServer base
+  runTest base
+  -- runServer base
 
 stripSuffix :: String -> String -> Maybe String
 stripSuffix suffix s

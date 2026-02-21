@@ -53,14 +53,14 @@ data AtomType
   | AtomAsk
   deriving (Show, Eq, Ord)
 
-isPositive AtomPos = True
-isPositive AtomNeg = False
-isPositive AtomAsk = False
-
 data PVar
-  = PVar2 Var [Var] Name
-  | PVar0
+  = PVar { pvar :: Maybe Var
+         , pdeps :: Maybe [Var]
+         , pname :: Maybe Name }
   deriving (Show, Eq, Ord)
+
+pattern NoVars = PVar Nothing Nothing Nothing
+pattern AllVars a b c = PVar (Just a) (Just b) (Just c)
 
 data Pattern = Pattern { ty :: AtomType, id :: PVar, terms :: [Term] }
   deriving (Show, Eq, Ord)
@@ -100,9 +100,13 @@ data Rule = Rule { body :: Set Constraint, head :: Set Constraint }
 
 type Ms b c a = (State (MMap b c)) a
 type M a = Ms String (Sum Int) a
-evalM m = evalState m M.empty
-
 type MonadFreshVarState m = MonadState (MMap String (Sum Int)) m
+
+isPositive AtomPos = True
+isPositive AtomNeg = False
+isPositive AtomAsk = False
+
+evalM m = evalState m M.empty
 
 fresh :: (MonadFreshVarState m) => String -> m Name
 fresh t = do
@@ -146,11 +150,15 @@ instance PP AtomType where
   pp AtomNeg = "?"
   pp AtomPos = "!"
   pp AtomAsk = "∃"
+instance PP PVar where
+  pp NoVars = ""
+  pp (PVar pv pvs mn) = bwrap $ mpp pv <> "=" <> mpp (do { n <- mn; vs <- pvs; pure $ Id n vs })
+    where
+      mpp :: PP a => Maybe a -> String
+      mpp = maybe "" pp
 instance PP Pattern where
-  pp (Pattern sign PVar0 c) = pp sign <> (pwrap . unwords . map pp $ c)
-  pp (Pattern sign (PVar2 i vs n) c) =
-    pp sign <> pwrap (pp i <> "=" <> pp (Id n vs)) <> ":"
-    <> (pwrap . unwords . map pp $ c)
+  pp (Pattern sign pv c) =
+    pp sign <> pp pv <> (pwrap . unwords . map pp $ c)
 instance PP Constraint where
   pp (Constraint p) = pp p
   pp (Cmp op a b) = pp a <> spwrap (pp op) <> pp b
@@ -218,4 +226,4 @@ tTraverse f =  go
     go (Max a b) = Max <$> go a <*> go b
 
 pattern PP p ts <- Pattern _ _ (TermPred p : ts)
-pattern PPI p i ts <- Pattern _ (PVar2 i _ _) (TermPred p : ts)
+pattern PPI p i ts <- Pattern _ (PVar (Just i) _ _) (TermPred p : ts)

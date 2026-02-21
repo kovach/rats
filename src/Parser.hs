@@ -36,9 +36,9 @@ term = app <|> cv <|> fv <|> v <|> p <|> rand <|> b <|> n
 pattern_ :: Parser T.Pattern
 pattern_ = q <|> a <|> k
   where
-    q = T.Pattern T.AtomNeg T.PVar0 <$> (char '?' *> wsSep term)
-    a = T.Pattern T.AtomPos T.PVar0 <$> (char '!' *> wsSep term)
-    k = T.Pattern T.AtomAsk T.PVar0 <$> (char '∃' *> wsSep term)
+    q = T.Pattern T.AtomNeg T.NoVars <$> (char '?' *> wsSep term)
+    a = T.Pattern T.AtomPos T.NoVars <$> (char '!' *> wsSep term)
+    k = T.Pattern T.AtomAsk T.NoVars <$> (char '∃' *> wsSep term)
 
 expr1 :: Parser T.E
 expr1 = at <|> p <|> af <|> vr

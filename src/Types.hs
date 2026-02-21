@@ -51,13 +51,11 @@ data AtomType
   = AtomNeg
   | AtomPos
   | AtomAsk
-  | AtomInterrobang
   deriving (Show, Eq, Ord)
 
 isPositive AtomPos = True
 isPositive AtomNeg = False
 isPositive AtomAsk = False
-isPositive AtomInterrobang = False
 
 data PVar
   = PVar2 Var [Var] Name

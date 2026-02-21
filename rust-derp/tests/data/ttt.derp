@@ -1,0 +1,120 @@
+eq A B -- eq B A.
+eq A B -- le A B, le B A.
+eq A B, eq B C -- eq A C.
+lt A B -- le A B.
+le A B, le B C -- le A C.
+le A B, lt B C -- lt A C.
+lt A B, le B C -- lt A C.
+lt A A -- zzz A.
+
+; move : id / it / to
+move Id It _, lt r(Id) T
+---
+moveBefore Id It T.
+
+moveBefore I1 It T, moveBefore I2 It T, lt r(I1) l(I2)
+---
+notLast I1 It T.
+
+moveBefore I It T, !notLast I It T
+----------------------------------
+last I It T.
+
+move M It At, NewId = id("at", bind(M, nil()))
+----------------------------------------------
+isId NewId, at NewId It At, move_at M NewId, eq l(NewId) r(M).
+
+isId T, last Move _ l(T), move_at Move Id
+--------------------------------------
+lt l(T) r(Id).
+
+; ?turn / ∃choice ?C.
+; ->
+; turn T, CHOICE = id(...), C = choice(id(...))
+; --
+; try choice(CHOICE, C).
+; split separate rule, so base rule is simpler?
+
+; try choice(CH, ...), !chose(CH)
+; ---
+; choice CH ....
+
+
+
+
+
+
+
+
+
+
+
+
+
+; main: (!(setup); (!(turn) ~ !(player o)))
+PLAYER0 = id("main:__PLAYER0", nil()), SETUP0 = id("main:__SETUP0", nil()), TURN0 = id("main:__TURN0", nil())
+---
+player PLAYER0 o, setup SETUP0, turn TURN0, lt l(PLAYER0) r(PLAYER0),
+lt l(SETUP0) r(SETUP0), lt l(TURN0) r(TURN0), lt r(SETUP0) l(TURN0), eq l(TURN0) l(PLAYER0),
+eq r(PLAYER0) r(TURN0), isId PLAYER0, isId SETUP0, isId TURN0.
+
+; setup: (?(setup) / (!(num TermApp "s" [TermApp "s" [TermApp "z" []]]) | (!(other o x) | !(other x o))))
+setup SETUP0, lt l(SETUP0) r(SETUP0), NUM0 = id("setup:__NUM0", bind(SETUP0, nil())), OTHER0 = id("setup:__OTHER0", bind(SETUP0, nil())),
+OTHER1 = id("setup:__OTHER1", bind(SETUP0, nil()))
+---
+num NUM0 s(s(z())), other OTHER0 o x, other OTHER1 x o, lt l(SETUP0) l(NUM0),
+lt l(SETUP0) l(OTHER0), lt l(SETUP0) l(OTHER1), lt l(NUM0) r(NUM0), lt l(OTHER0) r(OTHER0),
+lt l(OTHER1) r(OTHER1), lt r(NUM0) r(SETUP0), lt r(OTHER0) r(SETUP0), lt r(OTHER1) r(SETUP0),
+isId NUM0, isId OTHER0, isId OTHER1.
+
+; r3: (!(num X) \ (?(setup) / ?(num TermApp "s" [TermVar (NegVar "X")])))
+num NUM0 s(X), setup SETUP0, lt l(NUM0) r(NUM0), lt l(SETUP0) l(NUM0),
+lt l(SETUP0) r(SETUP0), lt r(NUM0) r(SETUP0), NUM1 = id("r3:__NUM1", bind(X, bind(SETUP0, bind(NUM0, nil()))))
+---
+num NUM1 X, lt l(SETUP0) l(NUM1), lt l(NUM1) r(NUM1), lt r(NUM1) r(SETUP0),
+isId NUM1.
+
+; r4: ((!(row X) | !(col X)) \ (?(setup) / ?(num X)))
+num NUM0 X, setup SETUP0, lt l(NUM0) r(NUM0), lt l(SETUP0) l(NUM0),
+lt l(SETUP0) r(SETUP0), lt r(NUM0) r(SETUP0), COL0 = id("r4:__COL0", bind(X, bind(SETUP0, bind(NUM0, nil())))), ROW0 = id("r4:__ROW0", bind(X, bind(SETUP0, bind(NUM0, nil()))))
+---
+col COL0 X, row ROW0 X, lt l(SETUP0) l(COL0), lt l(SETUP0) l(ROW0),
+lt l(COL0) r(COL0), lt l(ROW0) r(ROW0), lt r(COL0) r(SETUP0), lt r(ROW0) r(SETUP0),
+isId COL0, isId ROW0.
+
+; r5: (?(setup) / (?(row A) | (?(col B) | (!(cell !C) | (!(cell/row !C A) | !(cell/col !C B))))))
+col COL0 B, row ROW0 A, setup SETUP0, lt l(COL0) r(COL0),
+lt l(ROW0) r(ROW0), lt l(SETUP0) l(COL0), lt l(SETUP0) l(ROW0), lt l(SETUP0) r(SETUP0),
+lt r(COL0) r(SETUP0), lt r(ROW0) r(SETUP0), CELL/COL0 = id("r5:__CELL/COL0", bind(SETUP0, bind(ROW0, bind(A, bind(COL0, bind(B, nil())))))), CELL/ROW0 = id("r5:__CELL/ROW0", bind(SETUP0, bind(ROW0, bind(A, bind(COL0, bind(B, nil())))))),
+CELL0 = id("r5:__CELL0", bind(SETUP0, bind(ROW0, bind(A, bind(COL0, bind(B, nil()))))))
+---
+cell/col CELL/COL0 id("r5:C", bind(SETUP0, bind(ROW0, bind(A, bind(COL0, bind(B, nil())))))) B, cell/row CELL/ROW0 id("r5:C", bind(SETUP0, bind(ROW0, bind(A, bind(COL0, bind(B, nil())))))) A, cell CELL0 id("r5:C", bind(SETUP0, bind(ROW0, bind(A, bind(COL0, bind(B, nil())))))), lt l(SETUP0) l(CELL/COL0),
+lt l(SETUP0) l(CELL/ROW0), lt l(SETUP0) l(CELL0), lt l(CELL/COL0) r(CELL/COL0), lt l(CELL/ROW0) r(CELL/ROW0),
+lt l(CELL0) r(CELL0), lt r(CELL/COL0) r(SETUP0), lt r(CELL/ROW0) r(SETUP0), lt r(CELL0) r(SETUP0),
+isId CELL/COL0, isId CELL/ROW0, isId CELL0.
+
+; r6: (?(setup); (!(move a there); (!(move b there); (!(move a here); !(f)))))
+setup SETUP0, lt l(SETUP0) r(SETUP0), F0 = id("r6:__F0", bind(SETUP0, nil())), MOVE0 = id("r6:__MOVE0", bind(SETUP0, nil())),
+MOVE1 = id("r6:__MOVE1", bind(SETUP0, nil())), MOVE2 = id("r6:__MOVE2", bind(SETUP0, nil()))
+---
+f F0, move MOVE0 a there, move MOVE1 b there, move MOVE2 a here,
+lt l(F0) r(F0), lt l(MOVE0) r(MOVE0), lt l(MOVE1) r(MOVE1), lt l(MOVE2) r(MOVE2),
+lt r(SETUP0) l(MOVE0), lt r(MOVE0) l(MOVE1), lt r(MOVE1) l(MOVE2), lt r(MOVE2) l(F0),
+isId F0, isId MOVE0, isId MOVE1, isId MOVE2.
+
+; r7: ((?(at X Y), ?(f)) / !(z X Y))
+at AT0 X Y, f F0, lt l(AT0) r(AT0), lt l(AT0) r(F0),
+lt l(F0) r(AT0), lt l(F0) r(F0), Z0 = id("r7:__Z0", bind(AT0, bind(X, bind(Y, bind(F0, nil())))))
+---
+z Z0 X Y, lt l(AT0) l(Z0), lt l(F0) l(Z0), lt l(Z0) r(Z0),
+lt r(Z0) r(AT0), lt r(Z0) r(F0), isId Z0.
+
+; r8: (?(turn) / ∃(choice !C))
+turn TURN0, lt l(TURN0) r(TURN0), CHOICE0 = id("r8:__CHOICE0", bind(TURN0, nil()))
+---
+lt l(TURN0) l(CHOICE0), lt l(CHOICE0) r(CHOICE0), lt r(CHOICE0) r(TURN0), isId CHOICE0,
+try__ choice(CHOICE0, id("r8:C", bind(TURN0, nil()))).
+!chose__ X, try__ choice(X, X1)
+---
+choice X X1.
+

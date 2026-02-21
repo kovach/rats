@@ -19,6 +19,7 @@ probably should index predicates before this will do much
 ### result
 - reordering introduces a large slowdown (~10x). need to investigate later.
 - guard it with a flag.
+- it worked around an error in the prompt (it's missing the default case) but instead of adding a 5th case, it didn't implement the 4th case.
 
 # 26/02/20
 ## hash-consing terms

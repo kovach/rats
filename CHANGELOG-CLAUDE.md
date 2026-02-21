@@ -1,3 +1,58 @@
+# 26/02/21
+## join re-ordering
+probably should index predicates before this will do much
+
+### prompt
+[ ] reorder joins (prefer eq_bf, lt_bb)
+  - change the optimize_with function
+    - write a helper: given current bound, extract the first `lt` or `le` predicate atom whose arguments are both bound.
+    - write a helper: given current bound, extract the first `eq`-predicate atom whose arguments are both bound.
+    - write a helper: given current bound, extract the first `eq`-predicate atom with exactly one bound argument
+    - write a helper: given current bound, extract the first atom that is not `lt`, `le`, or `eq`
+    - algorithm:
+      - apply the helpers in the given order, taking the first one that returns `Some`.
+      - loop until done, as is currently written
+  - call this function inside `prespecialize`, only in the "non-trivial body" case
+    - use the `seen` value computed over `pats` to kick off the optimization process.
+    - optimize should be called just before `compile_expr(remaining, ...)`.
+
+### result
+- reordering introduces a large slowdown (~10x). need to investigate later.
+- guard it with a flag.
+
+# 26/02/20
+## hash-consing terms
+### prompt
+let's try to implement something like "hash cons" for our Term constructors.
+we want to reduce the complexity of the terms being hashed.
+To do this we will build a data structure ("term table") with the following interface:
+  - store : Term -> Id
+      Whenever a new Term is inserted, it will be granted a fresh id; if already present, the old id is returned.
+  - get : Id -> &Term
+      Return a ref to the Term that corresponds to Id
+
+We will add a new branch `Term::TermId` to the Term type (but not the `CTerm` type) which takes an Id and represents a stored term.
+
+In practice, for now we will only store `Term:App` values in our term table.
+Whenever we build a `Term::App`, we will store it in this table and use the id returned in its place.
+
+A few notes about functions to change:
+- `sub_term_compiled`: this function will invoke the new feature in the `CTerm::App` branch.
+  the other branches should stay the same
+- `match_term_compiled`: if `pat` is App and val is `TermId`, lookup the id and unify the `Term`.
+  - The other cases should not need to change.
+- This is not a complete list of functions to change.
+
+A new invariant we would like to check using a couple of tests:
+- any member of the Tuples data structures generated during evaluation should not contain any `Term::App` constructors (they should all be id'd instead).
+- any key stored in the term table should be a Term::App that is applied only to terms that are *not* App.
+
+### result
+5062bb8a60f6fa1558a7d8fed714ee931f719b8a
+  [CLAUDE] ...
+fc1e76d92a89123169ff902de16d6c18b578ab9c
+    fix correctness error: only unfold app terms when needed to unify
+
 # 26/02/16
 ## optimize binding use
   - add a compilation step that identifies where each variable is set (once per query) vs unified (every other reference).

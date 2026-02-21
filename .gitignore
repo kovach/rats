@@ -6,3 +6,6 @@ rats.hp
 rats.prof
 rats.ps
 *perf.data*
+*.json
+*.out.derp
+tmp*

@@ -43,49 +43,96 @@ fn atom_predicates(expr: &Expr) -> Vec<(Sym, usize)> {
 // -- Specialize ---------------------------------------------------------------
 
 // modify val's join order to take into account variables known to be bound
-pub fn optimize_with(bound: &mut Vec<Name>, val: Expr) -> Expr {
-    fn extract_best_atom(bound: &[Name], expr: &Expr) -> Option<(Tuple, Expr)> {
+pub fn optimize_with(bound: &mut Vec<Name>, val: Expr, interner: &Interner) -> Expr {
+    fn extract_matching<F: Fn(&Tuple) -> bool + Copy>(
+        expr: &Expr, pred: F
+    ) -> Option<(Tuple, Expr)> {
         match expr {
-            Expr::Atom(tuple) => Some((tuple.clone(), Expr::Unit)),
+            Expr::Atom(t) if pred(t) => Some((t.clone(), Expr::Unit)),
             Expr::Join(a, b) => {
-                match (extract_best_atom(bound, a), extract_best_atom(bound, b)) {
-                    (Some((lt, la)), Some((rt, ra))) => {
-                        let l_score = count_shared(&tuple_vars(&lt), bound);
-                        let r_score = count_shared(&tuple_vars(&rt), bound);
-                        if l_score >= r_score {
-                            Some((lt, join(la, *b.clone())))
-                        } else {
-                            Some((rt, join(*a.clone(), ra)))
-                        }
-                    }
-                    (Some((t, rest)), None) => Some((t, join(rest, *b.clone()))),
-                    (None, Some((t, rest))) => Some((t, join(*a.clone(), rest))),
-                    (None, None) => None,
+                if let Some((t, rest)) = extract_matching(a, pred) {
+                    Some((t, join(rest, *b.clone())))
+                } else if let Some((t, rest)) = extract_matching(b, pred) {
+                    Some((t, join(*a.clone(), rest)))
+                } else {
+                    None
                 }
             }
             _ => None,
         }
     }
 
+    fn pred_name(tuple: &Tuple, interner: &Interner) -> Option<String> {
+        tuple.first().and_then(|t| {
+            if let Term::Pred(n) = t.as_ref() { Some(n.resolve(interner).to_owned()) } else { None }
+        })
+    }
+
+    fn arg_bound(arg: &ATerm, bound: &[Name]) -> bool {
+        match arg.as_ref() {
+            Term::Var(VarOp::Name(n)) => bound.contains(n),
+            Term::Var(_) => panic!("arg_bound: already compiled"),
+            _ => true,
+        }
+    }
+
+    let extract_lt_le_bb = |bound: &[Name], interner: &Interner, expr: &Expr| {
+        extract_matching(expr, |t| {
+            matches!(pred_name(t, interner).as_deref(), Some("lt") | Some("le"))
+                && t.len() >= 3
+                && arg_bound(&t[1], bound)
+                && arg_bound(&t[2], bound)
+        })
+    };
+
+    let extract_eq_bb = |bound: &[Name], interner: &Interner, expr: &Expr| {
+        extract_matching(expr, |t| {
+            pred_name(t, interner).as_deref() == Some("eq")
+                && t.len() >= 3
+                && arg_bound(&t[1], bound)
+                && arg_bound(&t[2], bound)
+        })
+    };
+
+    let extract_eq_bf = |bound: &[Name], interner: &Interner, expr: &Expr| {
+        extract_matching(expr, |t| {
+            pred_name(t, interner).as_deref() == Some("eq")
+                && t.len() >= 3
+                && (arg_bound(&t[1], bound) ^ arg_bound(&t[2], bound))
+        })
+    };
+
+    let extract_non_cmp = |_bound: &[Name], interner: &Interner, expr: &Expr| {
+        extract_matching(expr, |t| {
+            match pred_name(t, interner).as_deref() {
+                Some("lt") | Some("le") | Some("eq") => false,
+                _ => true}
+        })
+    };
+
+
+    let extract_other = |_bound: &[Name], _interner: &Interner, expr: &Expr| {
+        extract_matching(expr, |_| true)
+    };
+
     let mut remaining = val;
     let mut result = Expr::Unit;
 
-    while let Some((atom, rest)) = extract_best_atom(bound, &remaining) {
-        let atom_vars = tuple_vars(&atom);
-        for v in atom_vars {
-            if !bound.contains(&v) {
-                bound.push(v);
-            }
+    while let Some((atom, rest)) =
+        extract_lt_le_bb(bound, interner, &remaining)
+        .or_else(|| extract_eq_bb(bound, interner, &remaining))
+        .or_else(|| extract_eq_bf(bound, interner, &remaining))
+        .or_else(|| extract_non_cmp(bound, interner, &remaining))
+        .or_else(|| extract_other(bound, interner, &remaining))
+    {
+        for v in tuple_vars(&atom) {
+            if !bound.contains(&v) { bound.push(v); }
         }
         result = join(result, Expr::Atom(atom));
         remaining = rest;
     }
 
     join(result, remaining)
-}
-
-pub fn optimize(ctx: &Binding, val: Expr) -> Expr {
-    optimize_with(&mut ctx.bound_vars(), val)
 }
 
 pub fn eval_rule(rule: &Rule, ts: &Tuples, check: &Tuples, table: &mut TermTable) -> Vec<Vec<Tuple>> {
@@ -327,7 +374,7 @@ fn collect_extractions(
 
 /// Build precomputed specializations for all non-immediate rules.
 /// Returns a map from predicate Sym to the list of SpecializedRules that match it.
-pub fn prespecialize(rules: Vec<Rule>) -> (Vec<SpecEntry>, HashMap<Sym, Vec<SpecializedRule>>) {
+pub fn prespecialize(rules: Vec<Rule>, interner: &Interner, reorder: bool) -> (Vec<SpecEntry>, HashMap<Sym, Vec<SpecializedRule>>) {
     let mut result: HashMap<Sym, Vec<SpecializedRule>> = HashMap::new();
     let mut immediate = Vec::new();
 
@@ -347,6 +394,7 @@ pub fn prespecialize(rules: Vec<Rule>) -> (Vec<SpecEntry>, HashMap<Sym, Vec<Spec
                 head: chead,
             });
         } else {
+            // non-trivial body
             for (pred_sym, _arity) in preds {
                 let mut extractions: Vec<(Vec<Tuple>, Expr)> = Vec::new();
                 collect_extractions(&rule.body.val, pred_sym, &mut |pats, remaining| {
@@ -372,7 +420,9 @@ pub fn prespecialize(rules: Vec<Rule>) -> (Vec<SpecEntry>, HashMap<Sym, Vec<Spec
                             cpats.push(compile_tuple(&pat[1..], &mut seen, &mut next_slot));
                         }
 
-                        let cremaining = compile_expr(remaining, &mut seen, &mut next_slot);
+                        let mut bound: Vec<Name> = seen.keys().map(|&s| Name::Sym(s)).collect();
+                        let optimized = if reorder { &optimize_with(&mut bound, remaining.clone(), interner) } else { remaining };
+                        let cremaining = compile_expr(&optimized, &mut seen, &mut next_slot);
 
                         let chead: Vec<Tuple> = rule.head.iter().map(|tuple| {
                             compile_tuple(tuple, &mut seen, &mut next_slot)
@@ -524,8 +574,8 @@ pub fn alt_iter(
 
 // -- iter_rules --------------------------------------------------
 
-pub fn iter_rules(initial: HashSet<Tuple>, all_rules: Vec<Rule>, intern: &Interner) -> (Tuples, TermTable) {
-    let (start, specs) = prespecialize(all_rules);
+pub fn iter_rules(initial: HashSet<Tuple>, all_rules: Vec<Rule>, intern: &Interner, reorder: bool) -> (Tuples, TermTable) {
+    let (start, specs) = prespecialize(all_rules, intern, reorder);
 
     let table = Rc::new(RefCell::new(TermTable::new()));
 
@@ -578,7 +628,7 @@ mod tests {
     fn run(src: &str) -> (Tuples, TermTable) {
         let mut intern = Interner::new();
         let rules = parse::parse(src, &mut intern).expect("parse");
-        iter_rules(HashSet::new(), rules, &intern)
+        iter_rules(HashSet::new(), rules, &intern, false)
     }
 
     /// Invariant 1: no Term::App appears in any output Tuple.

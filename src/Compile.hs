@@ -10,6 +10,7 @@ import Control.Monad.Writer
 import Control.Monad.State
 import Control.Monad
 import Data.Monoid (Sum(..))
+import Data.Function ((&))
 import Data.List hiding (take)
 import qualified Data.List
 import Data.Maybe
@@ -303,52 +304,50 @@ splitConstraints pvs x =
 
 type Constraints = Set Constraint
 
-depVarSet :: Constraints -> Var -> [Term] -> Set Var
-depVarSet cs v2 ts = Set.unions (Set.map tBefore cs) <> vBefore
+-- TODO
+scm f s = Set.map f s & Set.unions
+
+fixpoint :: Collection' t => (t -> t) -> t -> t
+fixpoint f x = let x' = f x in if size x' == size x then x else fixpoint f x'
+
+-- transitive closure
+transLe :: Ord a => Set (a,a) -> Set (a,a)
+transLe = fixpoint step
   where
-    tBefore (Cmp OpLt (L (TermVar v1)) (L (TermVar v2'))) | v2 == v2' = one v1
-    -- TODO eq
-    tBefore _ = none
+    step lts = lts <> (Set.cartesianProduct lts lts & scm (\((x,a),(b,y)) -> if a == b then one (x,y) else none))
 
-    vs = termsVars ts
-    vBefore = Set.unions . Set.map binders $ cs
-    binders (Constraint (Pattern AtomNeg (PVar (Just v) _ _) ts')) =
-      if not . null $ intersect (termsVars ts') vs then one v else none
-    binders _ = none
-
--- Compute transitive closure of a set of constraints with respect to equality and inequality
-saturate :: Constraints -> Constraints
-saturate = fixpoint step
+toLes :: Constraints -> Set (Var, Var)
+toLes cs = result
   where
-    isLt (Cmp OpLt a b) = Just (a, b)
-    isLt _ = Nothing
-    isEq (Cmp OpEq a b) = Just (a, b)
-    isEq _ = Nothing
+    result = base & transLe & scm toLL
+    toLL = \case (L (TermVar u), L (TermVar v)) -> one (u,v); _ -> none
+    base = scm (isLt <> isEq) cs <> vs
+    isLt = \case Cmp OpLt a b -> one (a,b); _ -> none
+    isEq = \case Cmp OpEq a b -> ofList [(a,b), (b,a)]; _ -> none
+    clist = Set.toList cs
+    vs = Set.fromList $ do
+      Constraint (Pattern AtomNeg (PVar (Just v) _ _) ts) <- clist
+      Constraint (Pattern _ (PVar (Just v') _ _) ts') <- clist
+      guard $ not . null $ intersect ts ts'
+      pure (L (TermVar v), L (TermVar v'))
 
-    step cs =
-      let lts    = mapMaybe isLt (Set.toList cs)
-          eqs    = mapMaybe isEq (Set.toList cs)
-          symEqs = eqs ++ [(b, a) | (a, b) <- eqs]
-          -- transitivity of <: a < b, b < c => a < c
-          new1   = [Cmp OpLt a c | (a, b) <- lts,    (b', c) <- lts,    b == b']
-          -- eq substitution in < (left): a = b, a < x => b < x
-          new2   = [Cmp OpLt b x | (a, b) <- symEqs, (a', x) <- lts,    a == a']
-          -- eq substitution in < (right): a = b, x < a => x < b
-          new3   = [Cmp OpLt x b | (a, b) <- symEqs, (x, a') <- lts,    a == a']
-          -- transitivity of =: a = b, b = c => a = c
-          new4   = [Cmp OpEq a c | (a, b) <- symEqs, (b', c) <- symEqs, b == b']
-      in cs <> Set.fromList (new1 <> new2 <> new3 <> new4)
-
-    fixpoint f x = let x' = f x in if size x' == size x then x else fixpoint f x'
 
 -- TODO: merging
-depVarSets :: [Constraint] -> [(Var, Set Var)]
-depVarSets cs = [ (v, depVarSet cs' v ts) | (v, ts) <- mapMaybe findPos $ cs ]
+depVarSets :: [Constraint] -> [([Var], Set Var)]
+depVarSets cs = map removeHead $ merge ans
   where
-    cs' = saturate $ Set.fromList cs
-    findPos (Constraint (Pattern AtomPos (PVar (Just v) _ _) ts)) = Just (v, ts)
-    -- TODO AtomAsk?
-    findPos _ = Nothing
+    removeHead (h, b) = (h, Set.filter (not . (`elem` h)) b)
+    merge [] = []
+    merge ((h,b) : xs) =
+      -- take out all groups with the same dependencies
+      let (same, rest) = partition ((== b) . snd) xs
+       in (h : map fst same, b) : merge rest
+    ans = [ (v, downward v les) | v <- heads ]
+    heads = mapMaybe findPos cs
+    les = toLes $ Set.fromList cs
+    downward v = scm (\(a,b) -> if b == v then one a else none)
+    findPos (Constraint (Pattern AtomPos (PVar (Just v) _ _) _)) = Just v
+    findPos _ = Nothing -- TODO AtomAsk?
 
 generateConstraints :: E -> Rule
 generateConstraints e = trace (unlines $ map pp c') $ out

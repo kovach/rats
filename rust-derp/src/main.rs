@@ -9,7 +9,7 @@ fn run_with_rules(rules: &[types::Rule], intern: &sym::Interner, timeout: Durati
     let initial: HashSet<types::Tuple> = HashSet::new();
     let start = Instant::now();
     // We can't easily interrupt iter_rules, so we just time it
-    let (result, _table) = core::iter_rules(initial, rules.to_vec(), intern, reorder);
+    let (result, _table, _stats) = core::iter_rules(initial, rules.to_vec(), intern, reorder);
     let elapsed = start.elapsed();
     if elapsed > timeout {
         Err(elapsed)
@@ -57,7 +57,7 @@ fn main() {
         bisect(&rules, &intern, Duration::from_secs(3), reorder);
     } else {
         let initial: HashSet<types::Tuple> = HashSet::new();
-        let (result, table) = core::iter_rules(initial, rules, &intern, reorder);
+        let (result, table, stats) = core::iter_rules(initial, rules, &intern, reorder);
 
         let base = filename.trim_end_matches(".derp");
         let json_path = format!("{}.json", base);
@@ -67,5 +67,16 @@ fn main() {
         fs::write(&derp_path, result.pp_derp_with_table(&intern, &table)).expect("could not write derp");
 
         eprintln!("{} tuples, wrote {} and {}", result.size(), json_path, derp_path);
+
+        // Collect all predicate names that appear in either map
+        let mut preds: Vec<_> = stats.ground.keys().chain(stats.scan.keys()).collect();
+        preds.sort();
+        preds.dedup();
+        eprintln!("eval stats (ground lookups / scan matches):");
+        for sym in preds {
+            let g = stats.ground.get(sym).copied().unwrap_or(0);
+            let s = stats.scan.get(sym).copied().unwrap_or(0);
+            eprintln!("  {:30} ground={:>10}  scan={:>10}", intern.resolve(*sym), g, s);
+        }
     }
 }

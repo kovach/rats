@@ -135,10 +135,28 @@ pub fn optimize_with(bound: &mut Vec<Name>, val: Expr, interner: &Interner) -> E
     join(result, remaining)
 }
 
-pub fn eval_rule(rule: &Rule, ts: &Tuples, check: &Tuples, table: &mut TermTable) -> Vec<Vec<Tuple>> {
+// -- Runtime statistics -------------------------------------------------------
+
+#[derive(Debug)]
+pub struct EvalStats {
+    /// Times the ground-lookup path ran (line 307), keyed by predicate sym.
+    pub ground: HashMap<Sym, u64>,
+    /// Times match_terms_compiled was called in the scan path (line 315), keyed by predicate sym.
+    pub scan: HashMap<Sym, u64>,
+}
+
+impl EvalStats {
+    pub fn new() -> Self {
+        EvalStats { ground: HashMap::new(), scan: HashMap::new() }
+    }
+}
+
+// -- eval_rule ----------------------------------------------------------------
+
+pub fn eval_rule(rule: &Rule, ts: &Tuples, check: &Tuples, table: &mut TermTable, stats: &mut EvalStats) -> Vec<Vec<Tuple>> {
     let mut results = Vec::new();
     let mut slots = vec![ablank(); 30]; // TODO
-    for final_slots in eval_flat(&mut slots, &rule.body.val.flatten(), ts, check, table) {
+    for final_slots in eval_flat(&mut slots, &rule.body.val.flatten(), ts, check, table, stats) {
         // Substitute head
         let head_tuples: Vec<Tuple> = rule.head.iter().map(|ht| {
             sub_terms_compiled(&final_slots, ht, table)
@@ -276,9 +294,10 @@ fn eval_flat(
     tuples: &Tuples,
     check: &Tuples,
     table: &mut TermTable,
+    stats: &mut EvalStats,
 ) -> Vec<Vec<ATerm>> {
     let mut bs = vec![];
-    eval_flat0(0, slots, &expr, tuples, check, &mut bs, table);
+    eval_flat0(0, slots, &expr, tuples, check, &mut bs, table, stats);
     bs
 }
 
@@ -290,6 +309,7 @@ fn eval_flat0(
     check: &Tuples,
     result: &mut Vec<Vec<ATerm>>,
     table: &mut TermTable,
+    stats: &mut EvalStats,
 ) {
     if idx == expr.len() {
         result.push(slots.clone());
@@ -304,16 +324,18 @@ fn eval_flat0(
             };
             let vs = &pat[1..];
             if vs.iter().all(term_is_groundable) {
+                *stats.ground.entry(pred).or_insert(0) += 1;
                 let key = sub_terms_compiled(slots, vs, table);
                 if tuples.contains(pred, &key) {
-                    eval_flat0(idx+1, slots, expr, tuples, check, result, table);
+                    eval_flat0(idx+1, slots, expr, tuples, check, result, table, stats);
                 }
             } else {
                 for stored_tuple in tuples.lookup(&pred) {
                     // NOTE: Stale slot values across invocations are safe because the compiler
                     // guarantees every `Check(i)` is dominated by a `Set(i)` within the same evaluation path.
+                    *stats.scan.entry(pred).or_insert(0) += 1;
                     if match_terms_compiled(slots, vs, stored_tuple, table) {
-                        eval_flat0(idx+1, slots, expr, tuples, check, result, table);
+                        eval_flat0(idx+1, slots, expr, tuples, check, result, table, stats);
                     }
                 }
             }
@@ -323,16 +345,16 @@ fn eval_flat0(
             match x.as_ref() {
                 Term::Var(VarOp::Set(i)) => {
                     slots[*i as usize] = y_sub;
-                    eval_flat0(idx+1, slots, expr, tuples, check, result, table);
+                    eval_flat0(idx+1, slots, expr, tuples, check, result, table, stats);
                 }
                 Term::Var(VarOp::Check(i)) => {
                     if slots[*i as usize] == y_sub {
-                        eval_flat0(idx+1, slots, expr, tuples, check, result, table);
+                        eval_flat0(idx+1, slots, expr, tuples, check, result, table, stats);
                     }
                 }
                 _ => {
                     if match_term_compiled(slots, x, &y_sub, table) {
-                        eval_flat0(idx+1, slots, expr, tuples, check, result, table);
+                        eval_flat0(idx+1, slots, expr, tuples, check, result, table, stats);
                     }
                 }
             }
@@ -340,10 +362,10 @@ fn eval_flat0(
         Expr::NegAtom(at) => {
             let substituted: Tuple = sub_terms_compiled(slots, at, table);
             if !check.contains_tuple(&substituted) {
-                eval_flat0(idx+1, slots, expr, tuples, check, result, table);
+                eval_flat0(idx+1, slots, expr, tuples, check, result, table, stats);
             }
         }
-        Expr::Unit => eval_flat0(idx+1, slots, expr, tuples, check, result, table),
+        Expr::Unit => eval_flat0(idx+1, slots, expr, tuples, check, result, table, stats),
         Expr::Join(_, _) => panic!(""),
     }
 }
@@ -470,6 +492,7 @@ pub fn eval_spec_entry(
     check: &Tuples,
     result: &mut Vec<Vec<Tuple>>,
     table: &mut TermTable,
+    stats: &mut EvalStats,
 ) {
     let slots = &mut entry.slots;
 
@@ -489,7 +512,7 @@ pub fn eval_spec_entry(
     }
     if ok {
         // Eval remaining
-        for final_slots in eval_flat(slots, &entry.remaining.flatten(), ts, check, table) {
+        for final_slots in eval_flat(slots, &entry.remaining.flatten(), ts, check, table, stats) {
             // Substitute head
             let head_tuples: Vec<Tuple> = entry.head.iter().map(|ht| {
                 sub_terms_compiled(&final_slots, ht, table)
@@ -508,11 +531,12 @@ pub fn eval1_spec(
     check: &Tuples,
     _intern: &Interner,
     table: &mut TermTable,
+    stats: &mut EvalStats,
 ) -> Vec<Vec<Tuple>> {
     let mut results = Vec::new();
 
     for entry in &mut spec.entries {
-        eval_spec_entry(entry, t, ts, check, &mut results, table);
+        eval_spec_entry(entry, t, ts, check, &mut results, table, stats);
     }
     results
 }
@@ -591,18 +615,20 @@ pub fn alt_iter(
 
 // -- iter_rules --------------------------------------------------
 
-pub fn iter_rules(initial: HashSet<Tuple>, all_rules: Vec<Rule>, intern: &Interner, reorder: bool) -> (Tuples, TermTable) {
+pub fn iter_rules(initial: HashSet<Tuple>, all_rules: Vec<Rule>, intern: &Interner, reorder: bool) -> (Tuples, TermTable, EvalStats) {
     let (mut start, mut specs) = prespecialize(all_rules, intern, reorder);
 
     let table = Rc::new(RefCell::new(TermTable::new()));
+    let stats = Rc::new(RefCell::new(EvalStats::new()));
 
     let mut ts0 = initial;
     // Apply unit-body rules to get initial tuples
     {
         let mut tbl = table.borrow_mut();
+        let mut st = stats.borrow_mut();
         for rule in &mut start {
             let mut ts = Vec::new();
-            eval_spec_entry(rule, &unit_tuple(), &Tuples::new(), &Tuples::new(), &mut ts, &mut tbl);
+            eval_spec_entry(rule, &unit_tuple(), &Tuples::new(), &Tuples::new(), &mut ts, &mut tbl, &mut st);
             for hts in ts {
                 for t in hts {
                     ts0.insert(t);
@@ -612,6 +638,7 @@ pub fn iter_rules(initial: HashSet<Tuple>, all_rules: Vec<Rule>, intern: &Intern
     }
 
     let table_clone = Rc::clone(&table);
+    let stats_clone = Rc::clone(&stats);
     let mut f = move |t: &Tuple, old: &Tuples, check: &Tuples| -> Vec<Vec<Tuple>> {
         let pred = match t[0].as_ref() {
             Term::Pred(Name::Sym(sym)) => *sym,
@@ -620,9 +647,10 @@ pub fn iter_rules(initial: HashSet<Tuple>, all_rules: Vec<Rule>, intern: &Intern
         match specs.get_mut(&pred) {
             Some(spec_rules) => {
                 let mut tbl = table_clone.borrow_mut();
+                let mut st = stats_clone.borrow_mut();
                 let mut results = Vec::new();
                 for spec_rule in spec_rules {
-                    results.extend(eval1_spec(spec_rule, t, old, check, intern, &mut tbl));
+                    results.extend(eval1_spec(spec_rule, t, old, check, intern, &mut tbl, &mut st));
                 }
                 results
             }
@@ -633,6 +661,7 @@ pub fn iter_rules(initial: HashSet<Tuple>, all_rules: Vec<Rule>, intern: &Intern
     let tuples = alt_iter(10, &ts0, &mut f, &Tuples::new());
     drop(f);
     let tbl = Rc::try_unwrap(table).unwrap().into_inner();
-    (tuples, tbl)
+    let st = Rc::try_unwrap(stats).unwrap().into_inner();
+    (tuples, tbl, st)
 }
 

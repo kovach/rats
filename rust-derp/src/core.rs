@@ -405,7 +405,7 @@ pub fn prespecialize(rules: Vec<Rule>, interner: &Interner, reorder: bool) -> (V
             immediate.push(SpecEntry {
                 pats: vec![],
                 remaining: body2,
-                num_slots: next_slot,
+                slots: vec![ablank(); next_slot as usize],
                 head: chead,
             });
         } else {
@@ -446,7 +446,7 @@ pub fn prespecialize(rules: Vec<Rule>, interner: &Interner, reorder: bool) -> (V
                         final_entries.push(SpecEntry {
                             pats: cpats,
                             remaining: cremaining,
-                            num_slots: next_slot,
+                            slots: vec![ablank(); next_slot as usize],
                             head: chead,
                         });
                     }
@@ -469,7 +469,7 @@ pub fn eval_spec_entry(
     result: &mut Vec<Vec<Tuple>>,
     table: &mut TermTable,
 ) {
-    let mut slots = vec![ablank(); entry.num_slots as usize];
+    let mut slots = entry.slots.clone();
 
     // Initialize slots from base_ctx
     // for (i, (_, val)) in entry.base_ctx.entries.iter().enumerate() {

@@ -553,7 +553,7 @@ pub struct SpecEntry {
     pub pats: Vec<Tuple>,            // compiled atom patterns (each without the pred)
     pub remaining: Expr,             // compiled remaining expression
     pub head: Vec<Tuple>,            // compiled head tuples for substitution
-    pub num_slots: u16,              // total number of variable slots
+    pub slots: Vec<ATerm>,           // pre-allocated blank slots vector
 }
 
 #[derive(Clone, Debug)]

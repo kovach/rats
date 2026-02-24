@@ -6,6 +6,7 @@ import Diagrams.Prelude
 import Diagrams.Backend.SVG
 import qualified Data.Text as T
 import qualified Graphics.Svg as Svg
+import Control.Monad (when)
 
 import DrawDiagram.Layout
 
@@ -56,12 +57,15 @@ makeDiagram (IntervalDiagram {title, content}) = (l, titled)
     titleLabel = text title # fontSizeL 10 # fc black -- # alignL # alignT
     titled = (titleLabel ||| strutX (fromIntegral $ 3 * length title) ||| dia) # frame 30
 
+debugLayout = False
+
 writeDiagram fn iD = do
   let (_ivs, dia) = makeDiagram iD
       opts = SVGOptions absolute (Just cssDefs) (T.pack "") [] True
       svgElement = renderDia SVG opts dia
       path = "diagrams/" <> fn
-  print (title iD, _ivs)
+  when debugLayout $
+    print (title iD, _ivs)
   Svg.renderToFile path svgElement
 
 cssDefs :: Svg.Element

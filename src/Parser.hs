@@ -33,12 +33,17 @@ term = app <|> cv <|> fv <|> v <|> p <|> rand <|> b <|> n
     n = T.TermNum <$> nat
     app = T.TermApp <$> predicate <*> parens (commaSep term)
 
+mvar :: (T.Name -> T.Var) -> Parser T.PVar
+mvar ty = do
+  mv <- optional $ brackets $ ty <$> variable
+  pure $ T.PVar mv Nothing
+
 pattern_ :: Parser T.Pattern
-pattern_ = q <|> a <|> k
+pattern_ = q <|> a
   where
-    q = T.Pattern T.AtomNeg T.NoVars <$> (char '?' *> wsSep term)
-    a = T.Pattern T.AtomPos T.NoVars <$> (char '!' *> wsSep term)
-    k = T.Pattern T.AtomAsk T.NoVars <$> (char '∃' *> wsSep term)
+    q = char '?' *> ws *> (T.Pattern T.AtomNeg <$> mvar T.NegVar <*> (wsSep term))
+    a = char '!' *> ws *> (T.Pattern T.AtomPos <$> mvar T.PosVar <*> (wsSep term))
+    -- k = T.Pattern T.AtomAsk T.NoVars <$> (char '∃' *> wsSep term)
 
 expr1 :: Parser T.E
 expr1 = at <|> p <|> af <|> vr

@@ -39,19 +39,6 @@ predPattern :: Pattern -> Maybe Pred
 predPattern (PP p _) = Just p
 predPattern _ = Nothing
 
-patternVars (Pattern _ (PVar i _ _) ts) = maybeToList i <> termsVars ts
--- constraintVars: junk
-termsVars = concatMap termVars
-termVars (TermVar v) = [v]
-termVars (TermChoiceVar _ v) = [v]
-termVars (TermApp _ ts) = termsVars ts
-termVars (TermFreshVar _) = [] -- these elaborate directly into an id constructor
-termVars (TermId (Id _ vs)) = vs -- should be redundant
-termVars (TermPred {}) = []
-termVars (TermExt _) = []
-termVars (TermNum _) = []
-termVars TermBlank = []
-
 freshAtomVar p | Just (Pred ('#':pr)) <- predPattern p = fresh $ capitalize pr
 freshAtomVar p | Just (Pred pr) <- predPattern p = fresh $ capitalize pr
 freshAtomVar _ = fresh "_id"
@@ -89,7 +76,10 @@ schema = execWriter . eTraverse' go
 elabEVars e = eTraverse (pure . go) e
   where
     vs = map varName $ patternBoundVars e
-    go (EVar (TermVar (NegVar v))) | not (v `elem` vs) = EVar (TermVar (ExVar v))
+    go (EVar (TermVar (NegVar v))) =
+      if not (v `elem` vs)
+         then EVar (TermVar (ExVar v))
+         else EVar (TermVar (NegVar v))
     go (EVar x) = trace ("!!! " <> show x<> " : " <> show vs) $ EVar x
     go x = x
 
@@ -100,43 +90,46 @@ elabCVars = eTermTraverse go
       pure (TermChoiceVar (Just $ NegVar v') v)
     go e = pure e
 
+ifNothing = flip fromMaybe
+
 elabNegAtoms ruleName e = eTraverse go e
   where
-    go (Atom p@(Pattern AtomNeg NoVars ts)) = do
-      m <- freshAtomVar p;
-      let var = if isBuiltin ts then ExVar m else NegVar m
-      pure $ Atom $ Pattern AtomNeg (AllVars var [] ruleName) ts
-    go (Atom p@(Pattern AtomNeg _ ts)) = error ""
+    go (Atom p@(Pattern AtomNeg (PVar mv Nothing) ts)) = do
+      mv' <- ifNothing mv <$> (NegVar <$> freshAtomVar p);
+      -- let var = if isBuiltin ts then ExVar m else NegVar m
+      pure $ Atom $ Pattern AtomNeg (AllVars mv' ruleName) ts
+    go (Atom (Pattern AtomNeg _ _)) = error ""
     go e' = pure e'
 
-elabPosAtoms vs ruleName e = eTraverse go e
+elabPosAtoms ruleName e = eTraverse go e
   where
-    go (Atom p@(Pattern AtomPos NoVars ts)) = do
-      m <- freshAtomVar p;
-      pure $ Atom $ Pattern AtomPos (AllVars (PosVar m) vs ruleName) ts
-    go (Atom p@(Pattern AtomAsk NoVars ts)) = do
-      m <- freshAtomVar p;
-      pure $ Atom $ Pattern AtomAsk (AllVars (PosVar m) vs ruleName) ts
-    go (Atom p@(Pattern AtomPos _ ts)) = error ""
-    go (Atom p@(Pattern AtomAsk _ ts)) = error ""
+    go (Atom p@(Pattern AtomPos (PVar mv Nothing) ts)) = do
+      m <- ifNothing mv <$> (PosVar <$> freshAtomVar p)
+      pure $ Atom $ Pattern AtomPos (PVar (Just $ m) (Just ruleName)) ts
+    --go (Atom p@(Pattern AtomAsk NoVars ts)) = do
+    --  m <- freshAtomVar p;
+    --  pure $ Atom $ Pattern AtomAsk (AllVars (PosVar m) vs ruleName) ts
+    go (Atom (Pattern AtomPos _ _)) = error ""
+    go (Atom (Pattern AtomAsk _ _)) = error ""
     go e' = pure e'
 
-elabPosVars vs ruleName e = eTermTraverse go e
-  where
-    go (TermFreshVar v) = pure $ TermId $ Id (ruleName <> ":" <> pp v) vs
-    go e' = pure e'
+--todo
+--elabPosVars vs ruleName e = eTermTraverse go e
+--  where
+--    go (TermFreshVar v) = pure $ TermId $ Id (ruleName <> ":" <> pp v) vs
+--    go e' = pure e'
 
 elab' r e = do
   -- mark existential variables,
   -- fresh names on choice vars,
   -- introduce bound variables
   e1 <- pure e >>= elabEVars >>= elabCVars >>= elabNegAtoms r
-  let vs = negVars e1
+  --let vs = negVars e1
   -- introduce fresh ids that capture the negVars for
   --   positive atoms, and
   --   `TermFreshVar` instances
-  elabPosAtoms vs r e1
-    >>= elabPosVars vs r
+  elabPosAtoms r e1
+    -- >>= elabPosVars r
 
 elab :: (Name, E) -> E
 elab = evalM . uncurry elab'
@@ -149,39 +142,26 @@ checkTerm = \case
     tell [Val (TermVar v') (TermVar v)]
   _ -> pure ()
 
--- todo
-conAtom v = (I a b, [a `Lt` b]) where a = leftEnd v; b = rightEnd v
-conOver (I al ar) (I bl br) = (I al ar, [al `Lt` bl, br `Lt` ar])
-conSame (I al ar) (I bl br) = (I al ar, [al `Eql` bl, br `Eql` ar])
-conAnd (I al ar) (I bl br) =
-  ( I (Max al bl) (Min ar br)
-  , [Max al bl `Lt` Min ar br])
-
 check :: MonadPatternWriter m => E -> m I
-check (Atom p@(Pattern AtomNeg (AllVars v@(ExVar _) _ _) ts)) | isBuiltin ts = do
+check (Atom p@(Pattern AtomNeg (AllVars v@(ExVar _) _) ts)) | isBuiltin ts = do
   mapM_ checkTerm ts
   tell [Constraint p]
   pure (I (leftEnd v) (rightEnd v))
-check (Atom (Pattern AtomNeg (AllVars _ _ _) ts)) | isBuiltin ts = error ""
-check (Atom p@(Pattern sign (AllVars v vs name) ts)) = do
+check (Atom (Pattern AtomNeg (AllVars _ _) ts)) | isBuiltin ts = error ""
+check (Atom p@(Pattern sign (AllVars v name) ts)) = do
   mapM_ checkTerm ts
   case sign of
     AtomPos -> do
       tell [Constraint p, (leftEnd v) `Lt` (rightEnd v)]
-      let i = TermId $ Id (name <> ":__" <> pp v) vs
-      tell [Eq (TermVar v) i, IsId (TermVar v)]
     AtomNeg -> do
       tell [Constraint p, (leftEnd v) `Lt` (rightEnd v)]
     AtomAsk -> do
       tell [Try p, (leftEnd v) `Lt` (rightEnd v)]
-      let i = TermId $ Id (name <> ":__" <> pp v) vs
-      tell [Eq (TermVar v) i, IsId (TermVar v)]
   pure (I (leftEnd v) (rightEnd v))
 check (EVar t) = do
   tell [L t `Lt` R t]
   pure $ I (L t) (R t)
 check (Atom p) = error $ pp p
--- check (Atom p) = error $ pp p
 check (After e) = do
   I _ ar <- check e
   pure $ I ar Top
@@ -289,22 +269,21 @@ tContainsId vs = \case
   Top -> False
   Bot -> False
 
-isPos _ (Constraint (Pattern AtomPos _ _)) = True
-isPos _ (Constraint (Pattern{})) = False
-isPos _ (Eq _ _) = False
-isPos _ (Val _ _) = False
-isPos vs (Cmp _ a b) = any (tContainsId vs) [a,b]
-isPos vs (IsId t) = termContainsId vs t
-isPos _ (Try _) = True
+isPos _vs (Constraint (Pattern AtomPos _ _)) = True
+isPos _vs (Constraint (Pattern{})) = False
+isPos _vs (Eq _ _) = False
+isPos _vs (Val _ _) = False
+isPos _vs (Cmp _ a b) = any (tContainsId _vs) [a,b]
+isPos _vs (IsId t) = termContainsId _vs t
+isPos _vs (Try _) = True
 
 splitConstraints :: [Var] -> [Constraint] -> Rule
-splitConstraints pvs x =
-  let (pos, neg) = partition (isPos pvs) x
+splitConstraints vs x =
+  let (pos, neg) = partition (isPos vs) x
    in Rule (Set.fromList neg) (Set.fromList pos)
 
 type Constraints = Set Constraint
 
--- TODO
 scm f s = Set.map f s & Set.unions
 
 fixpoint :: Collection' t => (t -> t) -> t -> t
@@ -321,22 +300,28 @@ toLes cs = result
   where
     result = base & transLe & scm toLL
     toLL = \case (L (TermVar u), L (TermVar v)) -> one (u,v); _ -> none
-    base = scm (isLt <> isEq) cs <> vs
+    base = scm (isLt <> isEq) cs <> vs0 <> vs1
     isLt = \case Cmp OpLt a b -> one (a,b); _ -> none
     isEq = \case Cmp OpEq a b -> ofList [(a,b), (b,a)]; _ -> none
     clist = Set.toList cs
-    vs = Set.fromList $ do
-      Constraint (Pattern AtomNeg (PVar (Just v) _ _) ts) <- clist
-      Constraint (Pattern _ (PVar (Just v') _ _) ts') <- clist
-      guard $ not . null $ intersect ts ts'
+    vs0 = Set.fromList $ do
+      Constraint (Pattern AtomNeg (PVar (Just v) _) ts) <- clist
+      v' <- termsVars ts
       pure (L (TermVar v), L (TermVar v'))
+    vs1 = Set.fromList $ do
+      Constraint (Pattern _ (PVar (Just v) _) ts) <- clist
+      v' <- termsVars ts
+      pure (L (TermVar v'), L (TermVar v))
 
+-- TODO: more merging
+type VarScope = ([Var], Set Var)
 
--- TODO: merging
-depVarSets :: [Constraint] -> [([Var], Set Var)]
+depVarSets :: [Constraint] -> [VarScope]
 depVarSets cs = map removeHead $ merge ans
   where
-    removeHead (h, b) = (h, Set.filter (not . (`elem` h)) b)
+    removeHead (h, b) = (h, Set.filter (not . ignoreCase h) b)
+    --removeHead (h, b) = (h, Set.filter (not . (`elem` h)) b)
+    ignoreCase h v = varName v `elem` (map varName h)
     merge [] = []
     merge ((h,b) : xs) =
       -- take out all groups with the same dependencies
@@ -346,18 +331,58 @@ depVarSets cs = map removeHead $ merge ans
     heads = mapMaybe findPos cs
     les = toLes $ Set.fromList cs
     downward v = scm (\(a,b) -> if b == v then one a else none)
-    findPos (Constraint (Pattern AtomPos (PVar (Just v) _ _) _)) = Just v
+    findPos (Constraint (Pattern AtomPos (PVar (Just v) _) _)) = Just v
     findPos _ = Nothing -- TODO AtomAsk?
 
-generateConstraints :: E -> Rule
-generateConstraints e = trace (unlines $ map pp c') $ out
+-- addScopes :: [VarScope] -> [Constraint]
+addScopes n = concatMap fix
   where
-    out = splitConstraints (posVars e) c
-    c' = depVarSets c
+    fix (hs, ds) = concatMap f hs
+      where
+        deps = Set.toList ds
+        f v = [ Eq (TermVar v) $ TermId $ Id (n <> ":" <> pp v) deps
+              , IsId (TermVar v) ]
+      -- let i = TermId $ Id (name <> ":__" <> pp v) vs
+      -- tell [Eq (TermVar v) i, IsId (TermVar v)]
+
+groupScope :: VarScope -> [Constraint] -> Rule
+groupScope (heads, deps) = splitConstraints heads . map fix . sub
+  where
+    allVars = heads <> Set.toList deps
+    sub = filter (\c -> constraintVars c `subset` allVars)
+    subset x y = all (`elem` y) x
+    fix (Constraint (Pattern AtomPos (AllVars v n) ts)) | v `elem` deps =
+      Constraint (Pattern AtomNeg (AllVars v n) ts)
+    fix x = x
+
+-- groupScopes :: [VarScope] -> [Constraint] -> [Rule]
+groupScopes vs cs = map (\v -> groupScope v cs) vs
+
+-- fixScopes :: [Constraint] -> [Rule]
+fixScopes n c = groupScopes deps $ addScopes n deps <> c <> newLts
+  where
+    deps = depVarSets c
+    newLts = do
+      (hs, bs) <- deps
+      b <- TermVar <$> hs
+      a <- TermVar <$> (Set.toList bs `intersect` evs)
+      pure $ Cmp OpLt (L a) (L b)
+
+    evs = episodeVars c
+    episodeVars = mapMaybe f
+      where
+        f (Constraint (Pattern _ (PVar (Just v) _) _)) = Just v
+        f _ = Nothing
+
+generateConstraints n e = trace (unlines $ map pp sets) c'
+  where
+    c' = fixScopes n c
     c = expandConstraints
         . quantElimConstraints (vars e)
         . expandConstraints
         . checkAll $ e
+
+    sets = depVarSets c
 
 ppt f cs = trace ("!!: " <> unlines (map pp cs)) $ f cs
 generateConstraints' e = splitConstraints (posVars e)
@@ -366,26 +391,35 @@ generateConstraints' e = splitConstraints (posVars e)
   . expandConstraints
   . checkAll $ e
 
-compileExp :: (Name, E) -> [Rule]
-compileExp pr@(_, _) = one r <> tryPatterns
+-- Remove `L a < R a` checks from rule bodies.
+simplRule :: Rule -> Rule
+simplRule (Rule {body, head}) = Rule {body = body', head = head'}
   where
-    r@(Rule _ h) = generateConstraints . elab $ pr
-    tryPatterns = mapMaybe fixTry $ Set.toList h
-    fixTry (Try p) = Just $ Rule b' h'
-      where
-        p' = freshPattern p
-        b' = Set.fromList $ [Try p', NegChose x]
-        h' = Set.fromList $ [Constraint p']
-    fixTry _ = Nothing
-    x = NegVar "X"
-    freshPattern (Pattern sign (AllVars _ ds n) (p : vs)) =
-      Pattern sign (AllVars x ds n) ts'
-        where
-          ts' = p : (map (\i -> TermVar $ NegVar $ "X" <> show i) [1.. length vs])
-    freshPattern _ = error ""
+    body' = Set.filter ok body
+    head' = head
+    ok (Cmp OpLt (L a) (R b)) | a == b = False
+    ok _ = True
 
--- todo:
---
+compileExp :: (Name, E) -> [Rule]
+compileExp pr@(n, _) = rs -- <> tryPatterns
+  where
+    rs = map simplRule . generateConstraints n . elab $ pr
+    --r@(Rule _ h) = generateConstraints . elab $ pr
+    --tryPatterns = mapMaybe fixTry $ Set.toList h
+    --fixTry (Try p) = error ""
+      --Just $ Rule b' h'
+      --where
+      --  p' = freshPattern p
+      --  b' = Set.fromList $ [Try p', NegChose x]
+      --  h' = Set.fromList $ [Constraint p']
+    --fixTry _ = Nothing
+    --x = NegVar "X"
+    -- freshPattern (Pattern sign (AllVars _ ds n) (p : vs)) =
+    --   Pattern sign (AllVars x ds n) ts'
+    --     where
+    --       ts' = p : (map (\i -> TermVar $ NegVar $ "X" <> show i) [1.. length vs])
+    -- freshPattern _ = error ""
+
 compile :: [Statement] -> String
 compile ps = result
   where
@@ -455,12 +489,6 @@ main2' input = do
   putStrLn "."
   pure out'
 
--- todo
-main4 = do
-  r1 <- TP.parse <$> readFile "ttt.turn"
-  layout <- DP.parse <$> readFile "layout.derp"
-  pure ()
-
 main2 = do
   --input <- readFile "test.derp"
   input <- readFile "layout.derp"
@@ -474,5 +502,3 @@ runTest base = do
   (result, rules) <- genDerp base
   writeFile "tmp.derp" result
   putStrLn rules
-  --(_, df, _) <- readProcessWithExitCode "diff" ["expected.derp", "tmp.derp"] ""
-  --putStrLn  df

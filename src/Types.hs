@@ -10,10 +10,13 @@ import MMap (MMap)
 import Data.Set (Set)
 import qualified Data.Set as Set
 import Data.String
+import Data.Maybe
 
 import Basic
 
 type Name = String
+data Global = Global Name Name
+-- TODO: still needed?
 data Var = NegVar Name | PosVar Name | ExVar Name
   deriving (Show, Eq, Ord)
 isNegVar = \case NegVar _ -> True; _ -> False
@@ -22,7 +25,7 @@ isExVar = \case ExVar _ -> True; _ -> False
 varName = \case
     NegVar v -> v
     PosVar v -> v
-    ExVar v ->  v
+    ExVar  v -> v
 data Id = Id Name [Var]
   deriving (Show, Eq, Ord)
 data Pred = Pred String
@@ -55,12 +58,12 @@ data AtomType
 
 data PVar
   = PVar { pvar :: Maybe Var
-         , pdeps :: Maybe [Var]
+         -- , pdeps :: Maybe [Var]
          , pname :: Maybe Name }
   deriving (Show, Eq, Ord)
 
-pattern NoVars = PVar Nothing Nothing Nothing
-pattern AllVars a b c = PVar (Just a) (Just b) (Just c)
+pattern NoVars = PVar Nothing Nothing
+pattern AllVars a c = PVar (Just a) (Just c)
 
 data Pattern = Pattern { ty :: AtomType, id :: PVar, terms :: [Term] }
   deriving (Show, Eq, Ord)
@@ -79,7 +82,6 @@ data E = Atom Pattern
 
 data Constraint
   = Constraint Pattern
-  | NegChose Var
   | Cmp Op T T
   | Eq Term Term
   | IsId Term
@@ -152,7 +154,7 @@ instance PP AtomType where
   pp AtomAsk = "∃"
 instance PP PVar where
   pp NoVars = ""
-  pp (PVar pv pvs mn) = bwrap $ mpp pv <> "=" <> mpp (do { n <- mn; vs <- pvs; pure $ Id n vs })
+  pp (PVar pv mn) = bwrap $ mpp pv -- <> "=" <> mpp (do { n <- mn; vs <- pvs; pure $ Id n vs })
     where
       mpp :: PP a => Maybe a -> String
       mpp = maybe "" pp
@@ -226,4 +228,28 @@ tTraverse f =  go
     go (Max a b) = Max <$> go a <*> go b
 
 pattern PP p ts <- Pattern _ _ (TermPred p : ts)
-pattern PPI p i ts <- Pattern _ (PVar (Just i) _ _) (TermPred p : ts)
+pattern PPI p i ts <- Pattern _ (PVar (Just i) _) (TermPred p : ts)
+
+patternVars (Pattern _ (PVar i _) ts) = maybeToList i <> termsVars ts
+termsVars = concatMap termVars
+termVars (TermVar v) = [v]
+termVars (TermChoiceVar _ v) = [v]
+termVars (TermApp _ ts) = termsVars ts
+termVars (TermFreshVar _) = [] -- these elaborate directly into an id constructor
+termVars (TermId (Id _ vs)) = vs -- should be redundant
+termVars (TermPred {}) = []
+termVars (TermExt _) = []
+termVars (TermNum _) = []
+termVars TermBlank = []
+constraintVars (Constraint p) = patternVars p
+constraintVars (Cmp _ a b) = tVars a <> tVars b
+constraintVars (IsId t) = termVars t
+constraintVars (Eq a b) = termVars a <> termVars b
+constraintVars (Val a b) = termVars a <> termVars b
+constraintVars (Try _) = error "todo"
+tVars (L t) = termVars t
+tVars (R t) = termVars t
+tVars (Min a b) = tVars a <> tVars b
+tVars (Max a b) = tVars a <> tVars b
+tVars Top = []
+tVars Bot = []

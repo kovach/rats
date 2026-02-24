@@ -29,7 +29,7 @@ patternCompile = \case
 constraintCompile :: Constraint -> String
 constraintCompile = \case
   Constraint p -> patternCompile p
-  NegChose v -> "!" <> spaces [chosePred, varCompile v]
+  -- NegChose v -> "!" <> spaces [chosePred, varCompile v]
   Cmp op a b -> spaces [opString op, tCompile a, tCompile b]
   Eq a b -> spaces [termCompile a, "=", termCompile b]
   IsId t -> spaces ["isId", termCompile t]
@@ -77,7 +77,7 @@ chunkAtoms xs =
 
 ruleBlockCompile (name, original) rules =
   let comment = "; " <> name <> ": " <> pp original <> "\n" in
-  comment <> concatMap ruleCompile rules
+  comment <> unlines (map ruleCompile rules)
 
 ruleCompile (Rule body h) =
     chunkAtoms (map constraintCompile $ Set.toList body)

@@ -7,17 +7,22 @@ setup: ?setup / (
   | !other x o
 ).
 
-!num X \ ?setup / ?num s(X).
-(!row X | !col X) \ ?setup / ?num X.
-?setup / ( ?row A | ?col B |
-  ( !cell !C | !cell/row !C A | !cell/col !C B )
+?setup / ( ?num s(X) | !num X ).
+?setup / ( ?num X | (!row X | !col X) ).
+-- ?setup / ( ?row A ~ ?col B ~ ![C]cell ~ !foo C).
+
+?setup, >?row A, >?col B / (
+  ( ![C]id | !cell C | !cell/row C A | !cell/col C B )
 ).
+
+
 
 ?setup; !move a there; !move b there; !move a here; !f.
 
 -- expect 2 results
 (?at X Y, ?f) / !z X Y.
 
-?turn / ( ∃choice !C ).
 
 exit
+
+?turn / ( ∃choice !C ).

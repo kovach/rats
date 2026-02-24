@@ -1,0 +1,21 @@
+?a / ( (!b / (?c X)); !d X; !e ).
+
+?f X | !g X.
+
+!a / (?b X) | !c X.
+
+?a X | ?b X Y | !c Y.
+
+?a X | !c.
+
+(?act ~ ?it dreams) / (
+  (!gain ~ !type major / (?forgot F))
+  | (!play ~ !it F)
+).
+
+exit
+
+(?act ~ ?it dreams) / (
+  (!gain ~ !type major / (?forgot F))
+  | (!play ~ !it)
+).

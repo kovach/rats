@@ -596,12 +596,12 @@ pub fn alt_iter(
 
     // First forward pass
     let mut wl1: Worklist = ts0.iter().cloned().collect();
-    let mut db1 = Tuples::new();
+    let mut db1 = v.empty_clone();
     let gen1 = iter(f, &mut wl1, &mut db1, v, v);
 
     // Second forward pass
     let mut wl2: Worklist = ts0.iter().cloned().collect();
-    let mut db2 = Tuples::new();
+    let mut db2 = v.empty_clone();
     let gen2 = iter(f, &mut wl2, &mut db2, v, &db1);
 
     if !gen1 {
@@ -615,7 +615,7 @@ pub fn alt_iter(
 
 // -- iter_rules --------------------------------------------------
 
-pub fn iter_rules(initial: HashSet<Tuple>, all_rules: Vec<Rule>, intern: &Interner, reorder: bool) -> (Tuples, TermTable, EvalStats) {
+pub fn iter_rules(initial: HashSet<Tuple>, all_rules: Vec<Rule>, intern: &Interner, reorder: bool, index_specs: Vec<(Sym, usize)>) -> (Tuples, TermTable, EvalStats) {
     let (mut start, mut specs) = prespecialize(all_rules, intern, reorder);
 
     let table = Rc::new(RefCell::new(TermTable::new()));
@@ -658,7 +658,8 @@ pub fn iter_rules(initial: HashSet<Tuple>, all_rules: Vec<Rule>, intern: &Intern
         }
     };
 
-    let tuples = alt_iter(10, &ts0, &mut f, &Tuples::new());
+    let template = Tuples::with_indices(index_specs);
+    let tuples = alt_iter(10, &ts0, &mut f, &template);
     drop(f);
     let tbl = Rc::try_unwrap(table).unwrap().into_inner();
     let st = Rc::try_unwrap(stats).unwrap().into_inner();

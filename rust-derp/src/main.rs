@@ -9,7 +9,7 @@ fn run_with_rules(rules: &[types::Rule], intern: &sym::Interner, timeout: Durati
     let initial: HashSet<types::Tuple> = HashSet::new();
     let start = Instant::now();
     // We can't easily interrupt iter_rules, so we just time it
-    let (result, _table, _stats) = core::iter_rules(initial, rules.to_vec(), intern, reorder);
+    let (result, _table, _stats) = core::iter_rules(initial, rules.to_vec(), intern, reorder, vec![]);
     let elapsed = start.elapsed();
     if elapsed > timeout {
         Err(elapsed)
@@ -57,7 +57,9 @@ fn main() {
         bisect(&rules, &intern, Duration::from_secs(3), reorder);
     } else {
         let initial: HashSet<types::Tuple> = HashSet::new();
-        let (result, table, stats) = core::iter_rules(initial, rules, &intern, reorder);
+        let lt_sym = intern.intern("lt");
+        let index_specs = vec![(lt_sym, 0), (lt_sym, 1)];
+        let (result, table, stats) = core::iter_rules(initial, rules, &intern, reorder, index_specs);
 
         let base = filename.trim_end_matches(".derp");
         let json_path = format!("{}.json", base);
@@ -77,6 +79,10 @@ fn main() {
             let g = stats.ground.get(sym).copied().unwrap_or(0);
             let s = stats.scan.get(sym).copied().unwrap_or(0);
             eprintln!("  {:30} ground={:>10}  scan={:>10}", intern.resolve(*sym), g, s);
+        }
+        eprintln!("index sizes:");
+        for ((pred, col), idx) in &result.indices {
+            eprintln!("  {} col {}: {} distinct keys", intern.resolve(*pred), col, idx.len());
         }
     }
 }

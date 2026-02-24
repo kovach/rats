@@ -4,7 +4,7 @@ use derp::{core, parse, sym, types::Term};
 fn run(src: &str) -> (derp::types::Tuples, derp::types::TermTable) {
     let mut intern = sym::Interner::new();
     let rules = parse::parse(src, &mut intern).expect("parse");
-    let (tuples, table, _stats) = core::iter_rules(HashSet::new(), rules, &intern, false);
+    let (tuples, table, _stats) = core::iter_rules(HashSet::new(), rules, &intern, false, vec![]);
     (tuples, table)
 }
 

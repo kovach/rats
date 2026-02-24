@@ -8,7 +8,7 @@ fn bench_file(c: &mut Criterion, name: &str, path: &str) {
             let mut intern = derp::sym::Interner::new();
             let rules = derp::parse::parse(&input, &mut intern).expect("parse");
             let initial = HashSet::new();
-            let (tuples, _table, _stats) = derp::core::iter_rules(initial, rules, &intern, false);
+            let (tuples, _table, _stats) = derp::core::iter_rules(initial, rules, &intern, false, vec![]);
             tuples
         });
     });
@@ -28,7 +28,7 @@ fn bench_out(c: &mut Criterion) {
             let mut intern = derp::sym::Interner::new();
             let rules = derp::parse::parse(&input, &mut intern).expect("parse");
             let initial = HashSet::new();
-            let (tuples, _table, _stats) = derp::core::iter_rules(initial, rules, &intern, false);
+            let (tuples, _table, _stats) = derp::core::iter_rules(initial, rules, &intern, false, vec![]);
             tuples
         });
     });

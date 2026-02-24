@@ -247,13 +247,33 @@ pub fn tuple_vars(t: &Tuple) -> Vec<Name> {
 #[derive(Clone, Debug)]
 pub struct Tuples {
     pub relations: HashMap<Sym, HashSet<Tuple>>,
+    /// Which (pred, col) pairs to maintain a secondary index for.
+    index_specs: Vec<(Sym, usize)>,
+    /// Secondary indices: (pred, col) → value_at_col → set of matching tuples (pred excluded).
+    pub indices: HashMap<(Sym, usize), HashMap<ATerm, HashSet<Tuple>>>,
 }
 
 impl Tuples {
     pub fn new() -> Self {
         Tuples {
             relations: HashMap::new(),
+            index_specs: Vec::new(),
+            indices: HashMap::new(),
         }
+    }
+
+    /// Create a Tuples with pre-allocated secondary index specs.
+    pub fn with_indices(specs: Vec<(Sym, usize)>) -> Self {
+        Tuples {
+            relations: HashMap::new(),
+            index_specs: specs,
+            indices: HashMap::new(),
+        }
+    }
+
+    /// Create an empty Tuples inheriting this instance's index specs.
+    pub fn empty_clone(&self) -> Self {
+        Tuples::with_indices(self.index_specs.clone())
     }
 
     /// Insert a tuple (pred : rest). Returns true if the tuple was new.
@@ -263,18 +283,36 @@ impl Tuples {
             _ => panic!("tuple must start with a Pred"),
         };
         let rest: Tuple = tuple[1..].into();
-        self.relations
-            .entry(pred)
-            .or_insert_with(HashSet::new)
-            .insert(rest)
+        self.insert(pred, rest)
     }
 
     /// Insert with pred already separated.
     pub fn insert(&mut self, pred: Sym, rest: Tuple) -> bool {
-        self.relations
+        if self.index_specs.is_empty() {
+            return self.relations
+                .entry(pred)
+                .or_insert_with(HashSet::new)
+                .insert(rest);
+        }
+        let is_new = self.relations
             .entry(pred)
             .or_insert_with(HashSet::new)
-            .insert(rest)
+            .insert(rest.clone());
+        if is_new {
+            let n = self.index_specs.len();
+            for i in 0..n {
+                let (ipred, col) = self.index_specs[i];
+                if ipred == pred && col < rest.len() {
+                    self.indices
+                        .entry((pred, col))
+                        .or_default()
+                        .entry(rest[col].clone())
+                        .or_default()
+                        .insert(rest.clone());
+                }
+            }
+        }
+        is_new
     }
 
     pub fn contains_tuple(&self, tuple: &Tuple) -> bool {
@@ -304,11 +342,20 @@ impl Tuples {
     /// Merge other into self (union semantics).
     pub fn union_from(&mut self, other: &Tuples) {
         for (pred, tuples) in &other.relations {
-            let entry = self.relations.entry(*pred).or_insert_with(HashSet::new);
             for t in tuples {
-                entry.insert(t.clone());
+                self.insert(*pred, t.clone());
             }
         }
+    }
+
+    /// Look up all tuples for `pred` whose value at `col` equals `val`.
+    /// Returns an empty iterator if no index exists for `(pred, col)`.
+    pub fn lookup_col(&self, pred: Sym, col: usize, val: &ATerm) -> impl Iterator<Item=&Tuple> + '_ {
+        self.indices
+            .get(&(pred, col))
+            .and_then(|idx| idx.get(val))
+            .into_iter()
+            .flat_map(|set| set.iter())
     }
 
     /// Add a single full tuple (with pred prefix).

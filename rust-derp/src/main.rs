@@ -58,7 +58,8 @@ fn main() {
     } else {
         let initial: HashSet<types::Tuple> = HashSet::new();
         let lt_sym = intern.intern("lt");
-        let index_specs = vec![(lt_sym, 0), (lt_sym, 1)];
+        let eq_sym = intern.intern("eq");
+        let index_specs = vec![(lt_sym, 0), (lt_sym, 1), (eq_sym, 0), (eq_sym, 1)];
         let (result, table, stats) = core::iter_rules(initial, rules, &intern, reorder, index_specs);
 
         let base = filename.trim_end_matches(".derp");

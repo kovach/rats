@@ -221,12 +221,31 @@ fn compile_expr(expr: &Expr, seen: &mut HashMap<Sym, u16>, next_slot: &mut u16) 
 
 // -- Compiled expression evaluation -------------------------------------------
 
-fn term_is_groundable(t: &ATerm) -> bool {
+fn is_groundable(t: &ATerm) -> bool {
     match t.as_ref() {
         Term::Var(VarOp::Set(_)) | Term::Blank => false,
-        Term::App(_, args) => args.iter().all(term_is_groundable),
+        Term::App(_, args) => args.iter().all(is_groundable),
         _ => true,
     }
+}
+
+enum AtomLookup {
+    AllBound,
+    SomeIndex(usize),
+    None,
+}
+
+/// Decide how to evaluate an atom with pattern `vs` against `tuples`.
+fn term_is_groundable(vs: &[ATerm], pred: Sym, tuples: &Tuples) -> AtomLookup {
+    if vs.iter().all(is_groundable) {
+        return AtomLookup::AllBound;
+    }
+    for (i, v) in vs.iter().enumerate() {
+        if is_groundable(v) && tuples.indices.contains_key(&(pred, i)) {
+            return AtomLookup::SomeIndex(i);
+        }
+    }
+    AtomLookup::None
 }
 
 fn match_term_compiled(slots: &mut Vec<ATerm>, pat: &ATerm, val: &ATerm, table: &TermTable) -> bool {
@@ -323,19 +342,31 @@ fn eval_flat0(
                 _ => panic!("compiled atom must start with Pred"),
             };
             let vs = &pat[1..];
-            if vs.iter().all(term_is_groundable) {
-                *stats.ground.entry(pred).or_insert(0) += 1;
-                let key = sub_terms_compiled(slots, vs, table);
-                if tuples.contains(pred, &key) {
-                    eval_flat0(idx+1, slots, expr, tuples, check, result, table, stats);
-                }
-            } else {
-                for stored_tuple in tuples.lookup(&pred) {
-                    // NOTE: Stale slot values across invocations are safe because the compiler
-                    // guarantees every `Check(i)` is dominated by a `Set(i)` within the same evaluation path.
-                    *stats.scan.entry(pred).or_insert(0) += 1;
-                    if match_terms_compiled(slots, vs, stored_tuple, table) {
+            // NOTE: Stale slot values across invocations are safe because the compiler
+            // guarantees every `Check(i)` is dominated by a `Set(i)` within the same evaluation path.
+            match term_is_groundable(vs, pred, tuples) {
+                AtomLookup::AllBound => {
+                    *stats.ground.entry(pred).or_insert(0) += 1;
+                    let key = sub_terms_compiled(slots, vs, table);
+                    if tuples.contains(pred, &key) {
                         eval_flat0(idx+1, slots, expr, tuples, check, result, table, stats);
+                    }
+                }
+                AtomLookup::SomeIndex(i) => {
+                    let val = sub_term_compiled(slots, &vs[i], table);
+                    for stored_tuple in tuples.lookup_col(pred, i, &val) {
+                        *stats.scan.entry(pred).or_insert(0) += 1;
+                        if match_terms_compiled(slots, vs, stored_tuple, table) {
+                            eval_flat0(idx+1, slots, expr, tuples, check, result, table, stats);
+                        }
+                    }
+                }
+                AtomLookup::None => {
+                    for stored_tuple in tuples.lookup(&pred) {
+                        *stats.scan.entry(pred).or_insert(0) += 1;
+                        if match_terms_compiled(slots, vs, stored_tuple, table) {
+                            eval_flat0(idx+1, slots, expr, tuples, check, result, table, stats);
+                        }
                     }
                 }
             }

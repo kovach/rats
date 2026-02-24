@@ -310,6 +310,8 @@ fn eval_flat0(
                 }
             } else {
                 for stored_tuple in tuples.lookup(&pred) {
+                    // NOTE: Stale slot values across invocations are safe because the compiler
+                    // guarantees every `Check(i)` is dominated by a `Set(i)` within the same evaluation path.
                     if match_terms_compiled(slots, vs, stored_tuple, table) {
                         eval_flat0(idx+1, slots, expr, tuples, check, result, table);
                     }
@@ -462,14 +464,14 @@ pub fn prespecialize(rules: Vec<Rule>, interner: &Interner, reorder: bool) -> (V
 }
 
 pub fn eval_spec_entry(
-    entry: &SpecEntry,
+    entry: &mut SpecEntry,
     t: &Tuple,
     ts: &Tuples,
     check: &Tuples,
     result: &mut Vec<Vec<Tuple>>,
     table: &mut TermTable,
 ) {
-    let mut slots = entry.slots.clone();
+    let slots = &mut entry.slots;
 
     // Initialize slots from base_ctx
     // for (i, (_, val)) in entry.base_ctx.entries.iter().enumerate() {
@@ -480,14 +482,14 @@ pub fn eval_spec_entry(
     let mut ok = true;
     let t_rest = &t[1..]; // skip pred
     for cpat in &entry.pats {
-        if !match_terms_compiled(&mut slots, cpat, t_rest, table) {
+        if !match_terms_compiled(slots, cpat, t_rest, table) {
             ok = false;
             break;
         }
     }
     if ok {
         // Eval remaining
-        for final_slots in eval_flat(&mut slots, &entry.remaining.flatten(), ts, check, table) {
+        for final_slots in eval_flat(slots, &entry.remaining.flatten(), ts, check, table) {
             // Substitute head
             let head_tuples: Vec<Tuple> = entry.head.iter().map(|ht| {
                 sub_terms_compiled(&final_slots, ht, table)
@@ -500,7 +502,7 @@ pub fn eval_spec_entry(
 /// Evaluate a compiled precomputed specialization against a concrete tuple.
 /// `t` is the full tuple (with pred at [0]).
 pub fn eval1_spec(
-    spec: &SpecializedRule,
+    spec: &mut SpecializedRule,
     t: &Tuple,
     ts: &Tuples,
     check: &Tuples,
@@ -509,7 +511,7 @@ pub fn eval1_spec(
 ) -> Vec<Vec<Tuple>> {
     let mut results = Vec::new();
 
-    for entry in &spec.entries {
+    for entry in &mut spec.entries {
         eval_spec_entry(entry, t, ts, check, &mut results, table);
     }
     results
@@ -524,7 +526,7 @@ pub fn eval1_spec(
 /// check: previous fixpoint (for negation)
 /// Returns (db, changed) where changed is the set of new tuples not in base.
 pub fn iter(
-    f: &dyn Fn(&Tuple, &Tuples, &Tuples) -> Vec<Vec<Tuple>>,
+    f: &mut dyn FnMut(&Tuple, &Tuples, &Tuples) -> Vec<Vec<Tuple>>,
     worklist: &mut Worklist,
     db: &mut Tuples,
     base: &Tuples,
@@ -559,7 +561,7 @@ pub fn iter(
 pub fn alt_iter(
     gas: usize,
     ts0: &HashSet<Tuple>,
-    f: &dyn Fn(&Tuple, &Tuples, &Tuples) -> Vec<Vec<Tuple>>,
+    f: &mut dyn FnMut(&Tuple, &Tuples, &Tuples) -> Vec<Vec<Tuple>>,
     v: &Tuples,
 ) -> Tuples {
     if gas == 0 {
@@ -590,7 +592,7 @@ pub fn alt_iter(
 // -- iter_rules --------------------------------------------------
 
 pub fn iter_rules(initial: HashSet<Tuple>, all_rules: Vec<Rule>, intern: &Interner, reorder: bool) -> (Tuples, TermTable) {
-    let (start, specs) = prespecialize(all_rules, intern, reorder);
+    let (mut start, mut specs) = prespecialize(all_rules, intern, reorder);
 
     let table = Rc::new(RefCell::new(TermTable::new()));
 
@@ -598,7 +600,7 @@ pub fn iter_rules(initial: HashSet<Tuple>, all_rules: Vec<Rule>, intern: &Intern
     // Apply unit-body rules to get initial tuples
     {
         let mut tbl = table.borrow_mut();
-        for rule in &start {
+        for rule in &mut start {
             let mut ts = Vec::new();
             eval_spec_entry(rule, &unit_tuple(), &Tuples::new(), &Tuples::new(), &mut ts, &mut tbl);
             for hts in ts {
@@ -610,12 +612,12 @@ pub fn iter_rules(initial: HashSet<Tuple>, all_rules: Vec<Rule>, intern: &Intern
     }
 
     let table_clone = Rc::clone(&table);
-    let f = move |t: &Tuple, old: &Tuples, check: &Tuples| -> Vec<Vec<Tuple>> {
+    let mut f = move |t: &Tuple, old: &Tuples, check: &Tuples| -> Vec<Vec<Tuple>> {
         let pred = match t[0].as_ref() {
             Term::Pred(Name::Sym(sym)) => *sym,
             _ => return Vec::new(),
         };
-        match specs.get(&pred) {
+        match specs.get_mut(&pred) {
             Some(spec_rules) => {
                 let mut tbl = table_clone.borrow_mut();
                 let mut results = Vec::new();
@@ -628,7 +630,7 @@ pub fn iter_rules(initial: HashSet<Tuple>, all_rules: Vec<Rule>, intern: &Intern
         }
     };
 
-    let tuples = alt_iter(10, &ts0, &f, &Tuples::new());
+    let tuples = alt_iter(10, &ts0, &mut f, &Tuples::new());
     drop(f);
     let tbl = Rc::try_unwrap(table).unwrap().into_inner();
     (tuples, tbl)

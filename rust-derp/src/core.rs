@@ -203,6 +203,14 @@ fn compile_expr(expr: &Expr, seen: &mut HashMap<Sym, u16>, next_slot: &mut u16) 
 
 // -- Compiled expression evaluation -------------------------------------------
 
+fn term_is_groundable(t: &ATerm) -> bool {
+    match t.as_ref() {
+        Term::Var(VarOp::Set(_)) | Term::Blank => false,
+        Term::App(_, args) => args.iter().all(term_is_groundable),
+        _ => true,
+    }
+}
+
 fn match_term_compiled(slots: &mut Vec<ATerm>, pat: &ATerm, val: &ATerm, table: &TermTable) -> bool {
     match pat.as_ref() {
         Term::Var(VarOp::Set(i)) => {
@@ -237,9 +245,9 @@ fn match_term_compiled(slots: &mut Vec<ATerm>, pat: &ATerm, val: &ATerm, table: 
     }
 }
 
-fn match_terms_compiled(slots: &mut Vec<ATerm>, pats: &[ATerm], vals: &[ATerm], table: &TermTable) -> bool {
-    if pats.len() != vals.len() { return false; }
-    for (p, v) in pats.iter().zip(vals.iter()) {
+fn match_terms_compiled(slots: &mut Vec<ATerm>, pattern: &[ATerm], tuple: &[ATerm], table: &TermTable) -> bool {
+    if pattern.len() != tuple.len() { return false; }
+    for (p, v) in pattern.iter().zip(tuple.iter()) {
         if !match_term_compiled(slots, p, v, table) { return false; }
     }
     true
@@ -295,9 +303,16 @@ fn eval_flat0(
                 _ => panic!("compiled atom must start with Pred"),
             };
             let vs = &pat[1..];
-            for stored_tuple in tuples.lookup(&pred) {
-                if match_terms_compiled(slots, vs, stored_tuple, table) {
+            if vs.iter().all(term_is_groundable) {
+                let key = sub_terms_compiled(slots, vs, table);
+                if tuples.contains(pred, &key) {
                     eval_flat0(idx+1, slots, expr, tuples, check, result, table);
+                }
+            } else {
+                for stored_tuple in tuples.lookup(&pred) {
+                    if match_terms_compiled(slots, vs, stored_tuple, table) {
+                        eval_flat0(idx+1, slots, expr, tuples, check, result, table);
+                    }
                 }
             }
         }

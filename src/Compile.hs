@@ -208,7 +208,10 @@ expandConstraint :: Constraint -> [Constraint]
 expandConstraint (Cmp op (Max a b) c) | opIneq op = expandConstraints [Cmp op a c, Cmp op b c]
 expandConstraint (Cmp op a (Min b c)) | opIneq op = expandConstraints [Cmp op a b, Cmp op a c]
 expandConstraint (Cmp OpEq a a') | a == a' = []
-expandConstraint (Cmp _ _ Top) = []
+expandConstraint (Cmp OpLt _ Top) = []
+expandConstraint (Cmp OpLt Top _) = trace "`Top <` error" []
+expandConstraint (Cmp OpLt _ Bot) = trace "`< Bot` error" []
+expandConstraint (Cmp OpLt Bot _) = []
 -- expandConstraint p@(Cmp _ (Min _ _) _) = error $ pp p  -- no disjunctive comparisons
 -- expandConstraint p@(Cmp _ _ (Max _ _)) = error $ pp p  -- no disjunctive comparisons
 expandConstraint x = [x]
@@ -277,10 +280,27 @@ isPos _vs (Cmp _ a b) = any (tContainsId _vs) [a,b]
 isPos _vs (IsId t) = termContainsId _vs t
 isPos _vs (Try _) = True
 
+genMagicLt :: Rule -> Rule
+genMagicLt (Rule negSet _) = result
+  where
+    neg = Set.toList negSet
+    cmps = map termOfEndpoint $ mapMaybe (\case Cmp OpLt a _ -> Just a; _ -> Nothing) neg
+    termOfEndpoint (L x) = x
+    termOfEndpoint (R x) = x
+    toMSPred term =
+      Other [TermPred "wantLt", term]
+    magicRule = Rule (Set.filter (not . isCmp) negSet) (Set.fromList $ map toMSPred cmps)
+    isCmp (Cmp {}) = True
+    isCmp _ = False
+    result = magicRule
+
+-- Use pvs as the set of positive variables
 splitConstraints :: [Var] -> [Constraint] -> Rule
-splitConstraints vs x =
-  let (pos, neg) = partition (isPos vs) x
-   in Rule (Set.fromList neg) (Set.fromList pos)
+splitConstraints pvs x = result
+  where
+    (pos, neg) = partition (isPos pvs) x
+    negSet = Set.fromList neg
+    result = Rule negSet (Set.fromList pos)
 
 type Constraints = Set Constraint
 
@@ -502,3 +522,7 @@ runTest base = do
   (result, rules) <- genDerp base
   writeFile "tmp.derp" result
   putStrLn rules
+
+-- TODO
+-- error handling
+-- debug/info log

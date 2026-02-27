@@ -29,6 +29,7 @@ patternCompile = \case
 constraintCompile :: Constraint -> String
 constraintCompile = \case
   Constraint p -> patternCompile p
+  Other ts -> spaces $ map termCompile ts
   -- NegChose v -> "!" <> spaces [chosePred, varCompile v]
   Cmp op a b -> spaces [opString op, tCompile a, tCompile b]
   Eq a b -> spaces [termCompile a, "=", termCompile b]

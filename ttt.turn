@@ -15,14 +15,11 @@ setup: ?setup / (
   ( ![C]id | !cell C | !cell/row C A | !cell/col C B )
 ).
 
-
-
 ?setup; !move a there; !move b there; !move a here; !f.
 
 -- expect 2 results
 (?at X Y, ?f) / !z X Y.
 
-
 exit
 
-?turn / ( ∃choice !C ).
+?turn / ( !choose to-mark ).

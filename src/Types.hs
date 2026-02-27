@@ -87,6 +87,7 @@ data Constraint
   | IsId Term
   | Val Term Term
   | Try Pattern
+  | Other [Term]
   deriving (Show, Eq, Ord)
 
 pattern Lt a b = Cmp OpLt a b

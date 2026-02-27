@@ -53,7 +53,6 @@ vars = nub . execWriter . eTraverse' go
 
 negVars :: E -> [Var]
 negVars = filter isNegVar . vars
-
 posVars :: E -> [Var]
 posVars = filter isPosVar . vars
 
@@ -199,6 +198,11 @@ check (Same a b) = do
   I bl br <- check b
   tell [al `Eql` bl, br `Eql` ar]
   pure $ I al ar
+check (SameIsh a b) = do
+  I al ar <- check a
+  I bl br <- check b
+  tell [al `Lt` bl, ar `Eql` br]
+  pure $ I al ar
 
 checkAll :: E -> [Constraint]
 checkAll = snd . runWriter . check
@@ -226,13 +230,13 @@ quantElimConstraints vs ps = out
     out' = nub $ rest <> elimAll <> elimEx
     out = chk c out'
     c = all ok out'
-    ok (Cmp _ a b) = not (a `elem` exVars || b `elem` exVars)
+    ok (Cmp _ a b) = not (a `elem` evs || b `elem` evs)
     ok _ = True
     (cmps, rest) = partition isCmp ps
-    elimEx = elimVars exVars cmps
-    elimAll = elimVars posVars elimEx
-    exVars = concatMap (\v -> [leftEnd v, rightEnd v]) $ filter isExVar vs
-    posVars = concatMap (\v -> [leftEnd v, rightEnd v]) $ filter isPosVar vs
+    elimEx = elimVars evs cmps
+    elimAll = elimVars pvs elimEx
+    evs = concatMap (\v -> [leftEnd v, rightEnd v]) $ filter isExVar vs
+    pvs = concatMap (\v -> [leftEnd v, rightEnd v]) $ filter isPosVar vs
     isGt v (Cmp OpLt _ v') = v == v'
     isGt _ _ = False
     isLt v (Cmp OpLt v' _) = v == v'
@@ -276,9 +280,10 @@ isPos _vs (Constraint (Pattern AtomPos _ _)) = True
 isPos _vs (Constraint (Pattern{})) = False
 isPos _vs (Eq _ _) = False
 isPos _vs (Val _ _) = False
-isPos _vs (Cmp _ a b) = any (tContainsId _vs) [a,b]
-isPos _vs (IsId t) = termContainsId _vs t
+isPos vs (Cmp _ a b) = any (tContainsId vs) [a,b]
+isPos vs (IsId t) = termContainsId vs t
 isPos _vs (Try _) = True
+isPos vs (Other ts) = any (termContainsId vs) ts
 
 genMagicLt :: Rule -> Rule
 genMagicLt (Rule negSet _) = result
@@ -287,6 +292,7 @@ genMagicLt (Rule negSet _) = result
     cmps = map termOfEndpoint $ mapMaybe (\case Cmp OpLt a _ -> Just a; _ -> Nothing) neg
     termOfEndpoint (L x) = x
     termOfEndpoint (R x) = x
+    termOfEndpoint _ = error ""
     toMSPred term =
       Other [TermPred "wantLt", term]
     magicRule = Rule (Set.filter (not . isCmp) negSet) (Set.fromList $ map toMSPred cmps)

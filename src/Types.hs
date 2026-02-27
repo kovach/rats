@@ -76,6 +76,7 @@ data E = Atom Pattern
        | Par E E
        | Over E E
        | Same E E
+       | SameIsh E E
        | At E E
        | Under E E
   deriving (Show, Eq, Ord)
@@ -155,7 +156,7 @@ instance PP AtomType where
   pp AtomAsk = "∃"
 instance PP PVar where
   pp NoVars = ""
-  pp (PVar pv mn) = bwrap $ mpp pv -- <> "=" <> mpp (do { n <- mn; vs <- pvs; pure $ Id n vs })
+  pp (PVar pv _mn) = bwrap $ mpp pv -- <> "=" <> mpp (do { n <- mn; vs <- pvs; pure $ Id n vs })
     where
       mpp :: PP a => Maybe a -> String
       mpp = maybe "" pp
@@ -164,6 +165,7 @@ instance PP Pattern where
     pp sign <> pp pv <> (pwrap . unwords . map pp $ c)
 instance PP Constraint where
   pp (Constraint p) = pp p
+  pp (Other ts) = pp ts
   pp (Cmp op a b) = pp a <> spwrap (pp op) <> pp b
   pp (Eq a b) = pp a <> spwrap "=" <> pp b
   pp (Val a b) = "Val " <> pp a <> " " <> pp b
@@ -183,6 +185,7 @@ instance PP E where
   pp (Under a b) = pwrap $ pp a <> " \\ " <> pp b
   pp (Same a b) = pwrap $ pp a <> " ~ " <> pp b
   pp (At a b) = pwrap $ pp a <> " @ " <> pp b
+  pp (SameIsh a b) = pwrap $ pp a <> " ~> " <> pp b
 
 tryPred = "try__"
 chosePred = "chose__"
@@ -199,6 +202,7 @@ eTraverse f = go
     go (Over a b) = Over <$> (go a) <*> (go b)
     go (Under a b) = Under <$> (go a) <*> (go b)
     go (Same a b) = Same <$> (go a) <*> (go b)
+    go (SameIsh a b) = SameIsh <$> (go a) <*> (go b)
     go (At a b) = At <$> (go a) <*> (go b)
 
 eTraverse' :: Applicative m => (E -> m ()) -> E -> m ()
@@ -243,6 +247,7 @@ termVars (TermExt _) = []
 termVars (TermNum _) = []
 termVars TermBlank = []
 constraintVars (Constraint p) = patternVars p
+constraintVars (Other ts) = termsVars ts
 constraintVars (Cmp _ a b) = tVars a <> tVars b
 constraintVars (IsId t) = termVars t
 constraintVars (Eq a b) = termVars a <> termVars b

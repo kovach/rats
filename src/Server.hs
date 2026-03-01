@@ -51,8 +51,8 @@ processTuples base tuples = do
   let problem = tuplesToProblem tuples
   putStrLn $ "got " ++ show (length (is problem)) ++ " intervals, "
           ++ show (length (cs problem)) ++ " constraints"
-  let iD = IntervalDiagram { title = base, content = problem }
-  writeDiagram (base ++ ".svg") iD
+  let iD = IntervalDiagram { title = base, content = problem, fn = base }
+  writeDiagram iD
   putStrLn $ "wrote " ++ base ++ ".svg"
 
 termToKey :: D.Term -> String

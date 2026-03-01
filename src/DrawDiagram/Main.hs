@@ -8,5 +8,5 @@ import DrawDiagram.Layout
 
 main :: IO ()
 main = do
-  sequence_ $ zipWith writeDiagram ["diagram-" ++ show i ++ ".svg" | i <- [0..]] demoDiagrams
+  sequence_ $ map writeDiagram demoDiagrams
   putStrLn $ "Wrote " ++ show (length demoDiagrams) ++ " SVGs and diagram.html"

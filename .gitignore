@@ -9,3 +9,5 @@ rats.ps
 *.json
 *.out.derp
 tmp*
+diagrams/*.svg
+diagrams/*.pdf

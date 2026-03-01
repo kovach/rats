@@ -48,36 +48,37 @@ t2 =
 
 data IntervalDiagram = IntervalDiagram
   { title :: String
+  , fn :: String
   , content :: Problem T
   }
 
 demoDiagrams =
-  [ IntervalDiagram "a / b" $
+  [ IntervalDiagram "a / b" "over"$
     prim "a" <> prim "b"
     <> constraints
       [ CLt (L "a") (L "b")
       , CLt (R "b") (R "a") ]
-  , IntervalDiagram "a; b" $
+  , IntervalDiagram "a; b" "seq" $
     prim "a" <> prim "b"
     <> constraints
       [ CLt (R "a") (L "b") ]
-  , IntervalDiagram "a, b" $
+  , IntervalDiagram "a, b" "comma" $
     prim "a" <> prim "b"
     <> constraints
       [ CLt (L "a") (L "b")
       , CLt (L "b") (R "a")
       , CLt (R "a") (R "b") ]
-  , IntervalDiagram "a @ b" $
+  , IntervalDiagram "a @ b" "at" $
     prim "a" <> prim "b"
     <> constraints
       [ CLt (L "a") (L "b")
       , CLt (L "b") (R "a") ]
-  , IntervalDiagram "a ~> b" $
+  , IntervalDiagram "a ~> b" "attr" $
     prim "a" <> prim "b"
     <> constraints
       [ CLt (L "a") (L "b")
       , CEq (R "a") (R "b") ]
-  , IntervalDiagram "several" t2
+  , IntervalDiagram "several" "several" t2
   ]
 
 -- fills in the transitive closure of the `CEq` and `CLt` constraints

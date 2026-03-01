@@ -79,6 +79,7 @@ data E = Atom Pattern
        | SameIsh E E
        | At E E
        | Under E E
+       | Instead E E
   deriving (Show, Eq, Ord)
 
 data Constraint
@@ -120,7 +121,7 @@ fresh t = do
 
 fixId = map fix
     where
-      fix '-' = '_'
+      fix '-' = '-'
       fix x = x
 instance IsString Pred where
   fromString = Pred
@@ -186,6 +187,7 @@ instance PP E where
   pp (Same a b) = pwrap $ pp a <> " ~ " <> pp b
   pp (At a b) = pwrap $ pp a <> " @ " <> pp b
   pp (SameIsh a b) = pwrap $ pp a <> " ~> " <> pp b
+  pp (Instead a b) = pwrap $ pp a <> " -> " <> pp b
 
 tryPred = "try__"
 chosePred = "chose__"
@@ -202,8 +204,9 @@ eTraverse f = go
     go (Over a b) = Over <$> (go a) <*> (go b)
     go (Under a b) = Under <$> (go a) <*> (go b)
     go (Same a b) = Same <$> (go a) <*> (go b)
-    go (SameIsh a b) = SameIsh <$> (go a) <*> (go b)
     go (At a b) = At <$> (go a) <*> (go b)
+    go (SameIsh a b) = SameIsh <$> (go a) <*> (go b)
+    go (Instead a b) = Instead <$> (go a) <*> (go b)
 
 eTraverse' :: Applicative m => (E -> m ()) -> E -> m ()
 eTraverse' f e0 = eTraverse (\e -> f e *> pure e) e0 *> pure ()
@@ -253,6 +256,8 @@ constraintVars (IsId t) = termVars t
 constraintVars (Eq a b) = termVars a <> termVars b
 constraintVars (Val a b) = termVars a <> termVars b
 constraintVars (Try _) = error "todo"
+constraintsVars :: [Constraint] -> [Var]
+constraintsVars = concatMap constraintVars
 tVars (L t) = termVars t
 tVars (R t) = termVars t
 tVars (Min a b) = tVars a <> tVars b

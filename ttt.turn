@@ -11,7 +11,7 @@ setup: ?setup / (
 ?setup / ( ?num X | (!row X | !col X) ).
 -- ?setup / ( ?row A ~ ?col B ~ ![C]cell ~ !foo C).
 
-?setup, >?row A, >?col B / (
+?setup, #?row A, #?col B / (
   ( ![C]id | !cell C | !cell/row C A | !cell/col C B )
 ).
 

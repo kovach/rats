@@ -50,20 +50,21 @@ depthColour i = colors !! (i `mod` length colors)
 lighten :: Double -> Colour Double -> Colour Double
 lighten t c = blend t white c
 
-makeDiagram (IntervalDiagram {title, content}) = (l, titled)
+makeDiagram (IntervalDiagram {title, content}) = (l, untitled)
   where
     l = layout content
     dia = renderIntervals l # alignBL
     titleLabel = text title # fontSizeL 10 # fc black -- # alignL # alignT
     titled = (titleLabel ||| strutX (fromIntegral $ 3 * length title) ||| dia) # frame 30
+    untitled = (dia) # frame 30
 
 debugLayout = False
 
-writeDiagram fn iD = do
+writeDiagram iD = do
   let (_ivs, dia) = makeDiagram iD
       opts = SVGOptions absolute (Just cssDefs) (T.pack "") [] True
       svgElement = renderDia SVG opts dia
-      path = "diagrams/" <> fn
+      path = "diagrams/" <> (fn iD) <> ".svg"
   when debugLayout $
     print (title iD, _ivs)
   Svg.renderToFile path svgElement

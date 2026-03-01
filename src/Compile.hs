@@ -203,6 +203,11 @@ check (SameIsh a b) = do
   I bl br <- check b
   tell [al `Lt` bl, ar `Eql` br]
   pure $ I al ar
+check (Instead a b) = do
+  I al ar <- check a
+  I bl br <- check b
+  tell [al `Eql` bl, ar `Eql` br]
+  pure $ I al ar
 
 checkAll :: E -> [Constraint]
 checkAll = snd . runWriter . check
@@ -223,20 +228,36 @@ expandConstraint x = [x]
 expandConstraints :: [Constraint] -> [Constraint]
 expandConstraints = concatMap expandConstraint
 
--- TODO: handle min, max in terms
-quantElimConstraints vs ps = out
+minus a b = filter (not . (`elem` b)) a
+endpoints v = [leftEnd v, rightEnd v]
+
+quantElimConstraintsGroup local ps = trace ("d: " <> pp local) $ quantElimConstraints' evs' pvst ps
   where
-    chk c x = if c then x else error ""
+    vs = constraintsVars ps
+    evst = concatMap (\v -> [leftEnd v, rightEnd v]) $ filter isExVar vs
+    pvs = filter isPosVar vs
+    pvst = concatMap endpoints pvs
+    evs' = evst <> (concatMap endpoints $ pvs `minus` local)
+
+quantElimConstraints :: [Constraint] -> [Constraint]
+quantElimConstraints ps = quantElimConstraints' evs pvs ps
+  where
+    vs = constraintsVars ps
+    evs = concatMap endpoints $ filter isExVar vs
+    pvs = concatMap endpoints $ filter isPosVar vs
+
+-- TODO: handle min, max in terms
+quantElimConstraints' evs pvs ps = out
+  where
+    chk x = if c then x else error ""
     out' = nub $ rest <> elimAll <> elimEx
-    out = chk c out'
+    out = chk out'
     c = all ok out'
     ok (Cmp _ a b) = not (a `elem` evs || b `elem` evs)
     ok _ = True
     (cmps, rest) = partition isCmp ps
     elimEx = elimVars evs cmps
     elimAll = elimVars pvs elimEx
-    evs = concatMap (\v -> [leftEnd v, rightEnd v]) $ filter isExVar vs
-    pvs = concatMap (\v -> [leftEnd v, rightEnd v]) $ filter isPosVar vs
     isGt v (Cmp OpLt _ v') = v == v'
     isGt _ _ = False
     isLt v (Cmp OpLt v' _) = v == v'
@@ -246,7 +267,6 @@ quantElimConstraints vs ps = out
     isEq _ _ = Nothing
     isCmp (Cmp {}) = True
     isCmp _ = False
-    isOther v (Cmp _ a b) = a /= v && b /= v
     byCmp v cmps = (ltx, xlt, xeq)
       where
         ltx = filter (isGt v) cmps
@@ -262,7 +282,8 @@ quantElimConstraints vs ps = out
         [] -> other <> cross ltx xlt
       where
         (ltx, xlt, xeq) = byCmp v cmps
-        other = filter (isOther v) cmps
+        other = filter isOther cmps
+        isOther (Cmp _ a b) = a /= v && b /= v
     elimVars vs cmps = foldr elimVar cmps vs
 
 termContainsId vs (TermVar v) = v `elem` vs
@@ -360,7 +381,7 @@ depVarSets cs = map removeHead $ merge ans
     findPos (Constraint (Pattern AtomPos (PVar (Just v) _) _)) = Just v
     findPos _ = Nothing -- TODO AtomAsk?
 
--- addScopes :: [VarScope] -> [Constraint]
+addScopes :: Name -> [VarScope] -> [Constraint]
 addScopes n = concatMap fix
   where
     fix (hs, ds) = concatMap f hs
@@ -368,11 +389,9 @@ addScopes n = concatMap fix
         deps = Set.toList ds
         f v = [ Eq (TermVar v) $ TermId $ Id (n <> ":" <> pp v) deps
               , IsId (TermVar v) ]
-      -- let i = TermId $ Id (name <> ":__" <> pp v) vs
-      -- tell [Eq (TermVar v) i, IsId (TermVar v)]
 
 groupScope :: VarScope -> [Constraint] -> Rule
-groupScope (heads, deps) = splitConstraints heads . map fix . sub
+groupScope (heads, deps) = splitConstraints heads . map fix . sub . quantElimConstraintsGroup allVars
   where
     allVars = heads <> Set.toList deps
     sub = filter (\c -> constraintVars c `subset` allVars)
@@ -381,7 +400,7 @@ groupScope (heads, deps) = splitConstraints heads . map fix . sub
       Constraint (Pattern AtomNeg (AllVars v n) ts)
     fix x = x
 
--- groupScopes :: [VarScope] -> [Constraint] -> [Rule]
+groupScopes :: [VarScope] -> [Constraint] -> [Rule]
 groupScopes vs cs = map (\v -> groupScope v cs) vs
 
 -- fixScopes :: [Constraint] -> [Rule]
@@ -404,7 +423,7 @@ generateConstraints n e = trace (unlines $ map pp sets) c'
   where
     c' = fixScopes n c
     c = expandConstraints
-        . quantElimConstraints (vars e)
+        . quantElimConstraints
         . expandConstraints
         . checkAll $ e
 
@@ -413,7 +432,7 @@ generateConstraints n e = trace (unlines $ map pp sets) c'
 ppt f cs = trace ("!!: " <> unlines (map pp cs)) $ f cs
 generateConstraints' e = splitConstraints (posVars e)
   . (ppt expandConstraints)
-  . (ppt $ quantElimConstraints (vars e))
+  . (ppt $ quantElimConstraints)
   . expandConstraints
   . checkAll $ e
 

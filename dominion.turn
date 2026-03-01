@@ -1,0 +1,52 @@
+!turn.
+
+?turn / ( !action-phase; !buy-phase; !cleanup-phase ).
+
+?action-phase / !play-action.
+
+?play-action / (
+  !choose-action ~> ?it A;
+  !announce ~> !it A
+).
+
+exit
+
+
+?play-action / (
+  !choose-action
+    ~> ?it A;
+  !announce
+    ~> !it A;
+  !move
+    ~> !it A
+    ~> !to play-area;
+  !activate
+    ~> !it A
+).
+
+
+?choose-action
+  ~> (!choose ~> ?var A)
+  / *card/type A action
+  / *at A your-hand
+.
+
+-- externally: `choose ~> it V` value bound
+?choose
+  / ![A]choice-var
+  ~> !var A
+.
+
+-- TODO one of these
+?choose-action ~ ∃ (?A, it A, A at your-hand, A type action).
+(?A, >type A action, at A your-hand) @ ∃it A ~ ?choose-action.
+(?A, >type A action, at A your-hand) @ ∃it A ~ ?play-action.
+
+-- example simple action
+?activate ~ ?it/name village / (
+  #[1] / !gain-card,
+  #[2] / !gain-action
+).
+
+-- ! todo: inline predicates?
+?it I ~ !it/name N | ?thing/name I N.

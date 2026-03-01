@@ -231,7 +231,7 @@ expandConstraints = concatMap expandConstraint
 minus a b = filter (not . (`elem` b)) a
 endpoints v = [leftEnd v, rightEnd v]
 
-quantElimConstraintsGroup local ps = trace ("d: " <> pp local) $ quantElimConstraints' evs' pvst ps
+quantElimConstraintsGroup local ps = quantElimConstraints' evs' pvst ps
   where
     vs = constraintsVars ps
     evst = concatMap (\v -> [leftEnd v, rightEnd v]) $ filter isExVar vs
@@ -322,7 +322,7 @@ genMagicLt (Rule negSet _) = result
     result = magicRule
 
 -- Use pvs as the set of positive variables
-splitConstraints :: [Var] -> [Constraint] -> Rule
+-- splitConstraints :: [Var] -> [Constraint] -> Rule
 splitConstraints pvs x = result
   where
     (pos, neg) = partition (isPos pvs) x
@@ -360,20 +360,39 @@ toLes cs = result
       v' <- termsVars ts
       pure (L (TermVar v'), L (TermVar v))
 
--- TODO: more merging
-type VarScope = ([Var], Set Var)
+ignoreCase h v = varName v `elem` (Set.map varName h)
+
+data VarScope = VS (Set Var) (Set Var)
+  deriving (Eq, Show)
+instance PP VarScope where
+  pp (VS h b) = bwrap $ pp h <> ":" <> pp b
+mergeVS (VS h1 b1) (VS h2 b2) =
+  let h = (h1 <> h2)
+      b = (b1 <> b2) & Set.filter (not . ignoreCase h)
+   in VS h b
 
 depVarSets :: [Constraint] -> [VarScope]
-depVarSets cs = map removeHead $ merge ans
+depVarSets cs = mergeSeq 10 . map removeHead . mergeIdentical $ ans
   where
-    removeHead (h, b) = (h, Set.filter (not . ignoreCase h) b)
+    removeHead (VS h b) = (VS h $ Set.filter (not . ignoreCase h) b)
     --removeHead (h, b) = (h, Set.filter (not . (`elem` h)) b)
-    ignoreCase h v = varName v `elem` (map varName h)
-    merge [] = []
-    merge ((h,b) : xs) =
+    mergeIdentical [] = []
+    mergeIdentical ((h,b) : xs) =
       -- take out all groups with the same dependencies
       let (same, rest) = partition ((== b) . snd) xs
-       in (h : map fst same, b) : merge rest
+       in (VS (Set.fromList $ h : map fst same) b) : mergeIdentical rest
+    -- TODO cleanup
+    mergeSeq 0 xs = error "gas"
+    mergeSeq n xs = case mapMaybe (mergeSeq' xs) xs of
+                    xs':_ -> mergeSeq (n-1) xs'
+                    [] -> xs
+    mergeSeq' xs v1 =
+      case findPick (canMergeSeq v1) (filter (/= v1) xs) of
+        Nothing -> Nothing
+        Just (v2,xs') -> Just $ (mergeVS v1 v2) : xs'
+    canMergeSeq t1@(VS _ b1) t2@(VS h2 b2) =
+      Set.isSubsetOf b2 b1
+      && (b1 `Set.difference` b2) `Set.isSubsetOf` h2
     ans = [ (v, downward v les) | v <- heads ]
     heads = mapMaybe findPos cs
     les = toLes $ Set.fromList cs
@@ -384,16 +403,16 @@ depVarSets cs = map removeHead $ merge ans
 addScopes :: Name -> [VarScope] -> [Constraint]
 addScopes n = concatMap fix
   where
-    fix (hs, ds) = concatMap f hs
+    fix (VS hs ds) = concatMap f hs
       where
         deps = Set.toList ds
         f v = [ Eq (TermVar v) $ TermId $ Id (n <> ":" <> pp v) deps
               , IsId (TermVar v) ]
 
 groupScope :: VarScope -> [Constraint] -> Rule
-groupScope (heads, deps) = splitConstraints heads . map fix . sub . quantElimConstraintsGroup allVars
+groupScope (VS heads deps) = splitConstraints heads . map fix . sub . quantElimConstraintsGroup allVars
   where
-    allVars = heads <> Set.toList deps
+    allVars = heads <> deps
     sub = filter (\c -> constraintVars c `subset` allVars)
     subset x y = all (`elem` y) x
     fix (Constraint (Pattern AtomPos (AllVars v n) ts)) | v `elem` deps =
@@ -408,8 +427,8 @@ fixScopes n c = groupScopes deps $ addScopes n deps <> c <> newLts
   where
     deps = depVarSets c
     newLts = do
-      (hs, bs) <- deps
-      b <- TermVar <$> hs
+      VS hs bs <- deps
+      b <- TermVar <$> Set.toList hs
       a <- TermVar <$> (Set.toList bs `intersect` evs)
       pure $ Cmp OpLt (L a) (L b)
 
@@ -518,7 +537,9 @@ main1 :: String -> IO String
 main1 base = do
   (result, ruleText) <- genDerp base
   putStrLn $ "generated derp:\n" <> ruleText
-  writeFile (base ++ ".derp") result
+  let outFile = (base ++ ".derp")
+  writeFile outFile result
+  putStrLn $ "wrote file " <> outFile
   pure result
 
 main2' input = do

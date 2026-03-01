@@ -112,3 +112,9 @@ assert a b = error $ "not-equal:\n" <> pp a <> "\n\n" <> pp b
 mconcatMap f = mconcat . map f
 
 (.>) = flip (.)
+
+findPick _ [] = Nothing
+findPick f (x : xs) | f x = Just (x, xs)
+findPick f (x : xs) = do
+  (r, ys) <- findPick f xs
+  pure (r, x:ys)

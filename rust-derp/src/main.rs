@@ -45,6 +45,7 @@ fn main() {
     let filename = args.get(1).expect("usage: derp <file.derp> [--bisect] [--reorder]");
     let do_bisect = args.iter().any(|a| a == "--bisect");
     let reorder = args.iter().any(|a| a == "--reorder");
+    let skip_out = args.iter().any(|a| a == "--no-write");
 
     let input = fs::read_to_string(filename).expect("could not read file");
 
@@ -66,8 +67,10 @@ fn main() {
         let json_path = format!("{}.json", base);
         let derp_path = format!("{}.out.derp", base);
 
-        fs::write(&json_path, result.to_json_with_table(&intern, &table)).expect("could not write json");
-        fs::write(&derp_path, result.pp_derp_with_table(&intern, &table)).expect("could not write derp");
+        if !skip_out {
+            fs::write(&json_path, result.to_json_with_table(&intern, &table)).expect("could not write json");
+            fs::write(&derp_path, result.pp_derp_with_table(&intern, &table)).expect("could not write derp");
+        }
 
         eprintln!("{} tuples, wrote {} and {}", result.size(), json_path, derp_path);
 

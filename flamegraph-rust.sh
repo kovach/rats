@@ -1,1 +1,1 @@
-time cargo flamegraph --release --manifest-path rust-derp/Cargo.toml -- ttt.derp
+time cargo flamegraph --release --manifest-path rust-derp/Cargo.toml -- ttt.derp --no-write

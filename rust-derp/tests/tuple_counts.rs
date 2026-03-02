@@ -9,3 +9,13 @@ fn ttt_produces_4636_tuples() {
     let (tuples, _table, _stats) = core::iter_rules(HashSet::new(), rules, &intern, false, vec![]);
     assert_eq!(tuples.size(), 4636);
 }
+
+#[test]
+// requires 3 iteration steps
+fn neg_test_1() {
+    let input = include_str!("data/neg_simple.derp");
+    let mut intern = sym::Interner::new();
+    let rules = parse::parse(input, &mut intern).expect("parse");
+    let (tuples, _table, _stats) = core::iter_rules(HashSet::new(), rules, &intern, false, vec![]);
+    assert_eq!(tuples.size(), 21);
+}

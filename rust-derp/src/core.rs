@@ -588,24 +588,22 @@ pub fn iter(
     check: &Tuples,
 ) -> bool {
     let mut changed = false;
-    // Mirror the Haskell Set worklist semantics: track all tuples ever
-    // enqueued so we never enqueue the same tuple twice.
-    let mut enqueued: HashSet<Tuple> = worklist.iter().cloned().collect();
 
     while let Some(t) = worklist.pop_front() {
-        let new_thunks = f(&t, db, check);
-        for head_tuples in &new_thunks {
-            for tuple in head_tuples {
-                if !db.contains_tuple(tuple) && !enqueued.contains(tuple) {
-                    enqueued.insert(tuple.clone());
-                    worklist.push_back(tuple.clone());
-                    if !base.contains_tuple(tuple) {
-                        changed = true;
+        if !db.contains_tuple(&t) {
+            let new_thunks = f(&t, db, check);
+            for head_tuples in &new_thunks {
+                for tuple in head_tuples {
+                    if !db.contains_tuple(tuple) {
+                        worklist.push_back(tuple.clone());
+                        if !base.contains_tuple(tuple) {
+                            changed = true;
+                        }
                     }
                 }
             }
+            db.add_one(&t);
         }
-        db.add_one(&t);
     }
 
     changed
@@ -630,18 +628,16 @@ pub fn alt_iter(
     let mut db1 = v.empty_clone();
     let gen1 = iter(f, &mut wl1, &mut db1, v, v);
 
+    if !gen1 { return db1 };
+
     // Second forward pass
     let mut wl2: Worklist = ts0.iter().cloned().collect();
     let mut db2 = v.empty_clone();
     let gen2 = iter(f, &mut wl2, &mut db2, v, &db1);
 
-    if !gen1 {
-        db1
-    } else if !gen2 {
-        db2
-    } else {
-        alt_iter(gas - 1, ts0, f, &db2)
-    }
+    if !gen2 { return db2 };
+
+    alt_iter(gas - 1, ts0, f, &db2)
 }
 
 // -- iter_rules --------------------------------------------------

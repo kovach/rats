@@ -390,10 +390,27 @@ fn eval_flat0(
                 }
             }
         }
-        Expr::NegAtom(at) => {
-            let substituted: Tuple = sub_terms_compiled(slots, at, table);
-            if !check.contains_tuple(&substituted) {
-                eval_flat0(idx+1, slots, expr, tuples, check, result, table, stats);
+        Expr::NegAtom(pat) => {
+            let pred = match pat[0].as_ref() {
+                Term::Pred(Name::Sym(s)) => *s,
+                _ => panic!("compiled atom must start with Pred"),
+            };
+            let vs = &pat[1..];
+            match term_is_groundable(vs, pred, tuples) {
+                AtomLookup::AllBound => {
+                    let substituted: Tuple = sub_terms_compiled(slots, pat, table);
+                    if !check.contains_tuple(&substituted) {
+                        eval_flat0(idx+1, slots, expr, tuples, check, result, table, stats);
+                    }
+                }
+                _ => {
+                    if !check.lookup(&pred).any(|stored_tuple| {
+                        *stats.scan.entry(pred).or_insert(0) += 1;
+                        match_terms_compiled(slots, vs, stored_tuple, table)
+                    }) {
+                        eval_flat0(idx+1, slots, expr, tuples, check, result, table, stats);
+                    }
+                }
             }
         }
         Expr::Unit => eval_flat0(idx+1, slots, expr, tuples, check, result, table, stats),

@@ -321,9 +321,7 @@ impl Tuples {
             _ => panic!("tuple must start with a Pred"),
         };
         let rest: Tuple = tuple[1..].into();
-        self.relations
-            .get(&pred)
-            .map_or(false, |set| set.contains(&rest))
+        return self.contains(pred, &rest);
     }
 
     pub fn contains(&self, pred: Sym, rest: &Tuple) -> bool {

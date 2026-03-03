@@ -113,6 +113,10 @@ mconcatMap f = mconcat . map f
 
 (.>) = flip (.)
 
+picks :: [a] -> [(a, [a])]
+picks [] = []
+picks (x : xs) = (x, xs) : (map ((x:) <$>) $ picks xs)
+
 findPick _ [] = Nothing
 findPick f (x : xs) | f x = Just (x, xs)
 findPick f (x : xs) = do

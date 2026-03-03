@@ -45,6 +45,11 @@ pattern_ = q <|> a
     a = char '!' *> ws *> (T.Pattern T.AtomPos <$> mvar T.PosVar <*> (wsSep term))
     -- k = T.Pattern T.AtomAsk T.NoVars <$> (char '∃' *> wsSep term)
 
+
+--tjo = map f ops
+--  where
+--    f (op, text) = ws *> text *> ws *>
+
 -- e2 -> e2 ~> e1
 -- e2 -> e1
 -- e1 -> atom | parens e5

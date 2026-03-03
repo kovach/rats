@@ -372,7 +372,7 @@ mergeVS (VS h1 b1) (VS h2 b2) =
    in VS h b
 
 depVarSets :: [Constraint] -> [VarScope]
-depVarSets cs = mergeSeq 10 . map removeHead . mergeIdentical $ ans
+depVarSets cs = mergeSeq . map removeHead . mergeIdentical $ ans
   where
     removeHead (VS h b) = (VS h $ Set.filter (not . ignoreCase h) b)
     --removeHead (h, b) = (h, Set.filter (not . (`elem` h)) b)
@@ -382,15 +382,14 @@ depVarSets cs = mergeSeq 10 . map removeHead . mergeIdentical $ ans
       let (same, rest) = partition ((== b) . snd) xs
        in (VS (Set.fromList $ h : map fst same) b) : mergeIdentical rest
     -- TODO cleanup
-    mergeSeq 0 xs = error "gas"
-    mergeSeq n xs = case mapMaybe (mergeSeq' xs) xs of
-                    xs':_ -> mergeSeq (n-1) xs'
+    mergeSeq xs = case mapMaybe (uncurry mergeSeq') $ picks xs of
+                    xs':_ -> mergeSeq xs'
                     [] -> xs
-    mergeSeq' xs v1 =
-      case findPick (canMergeSeq v1) (filter (/= v1) xs) of
-        Nothing -> Nothing
-        Just (v2,xs') -> Just $ (mergeVS v1 v2) : xs'
-    canMergeSeq t1@(VS _ b1) t2@(VS h2 b2) =
+    mergeSeq' v1 xs = do
+      (v2, xs') <- findPick (canMergeSeq v1) xs
+      pure $ (mergeVS v1 v2) : xs'
+    -- Scopes can be safely merged into one
+    canMergeSeq (VS _ b1) (VS h2 b2) =
       Set.isSubsetOf b2 b1
       && (b1 `Set.difference` b2) `Set.isSubsetOf` h2
     ans = [ (v, downward v les) | v <- heads ]

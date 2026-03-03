@@ -6,23 +6,13 @@
 
 ?play-action / (
   !choose-action ~> ?it A;
-  !announce ~> !it A
+  !announce      ~> !it A;
+  !move          ~> !it A
+                 ~> !to play-area;
+  !activate      ~> !it A
 ).
 
 exit
-
-?play-action / (
-  !choose-action
-    ~> ?it A;
-  !announce
-    ~> !it A;
-  !move
-    ~> !it A
-    ~> !to play-area;
-  !activate
-    ~> !it A
-).
-
 
 ?choose-action
   ~> (!choose ~> ?var A)
@@ -41,11 +31,30 @@ exit
 (?A, >type A action, at A your-hand) @ ∃it A ~ ?choose-action.
 (?A, >type A action, at A your-hand) @ ∃it A ~ ?play-action.
 
--- example simple action
-?activate ~ ?it/name village / (
+-- How to activate an action; two examples.
+
+-- Village (card text: +1 card, +2 action)
+?activate ~> it I, card/name I village / (
   #[1] / !gain-card,
   #[2] / !gain-action
 ).
+
+?activate ~> it I, card/name I throne-room / (
+  !choose-action ~> ?it A;
+  !play-action ~> !it A;
+  !play-action ~> !it A;
+).
+
+-- Scheme
+
+-- Hermit (when discard component)
+-- When you discard this from play, if you did not buy any cards this turn, trash this and gain a Madman from the Madman pile.
+?activate ~> it I, card/name I hermit / !active-hermit I.
+?turn ~> !bought-card / ?buy.
+?turn ~> ¬bought-card, ?active-hermit I /
+  ?discard ~> ?it I;
+  !trash ~> !it I;
+  !gain ~> !from (pile/type: madman).
 
 -- ! todo: inline predicates?
 ?it I ~ !it/name N | ?thing/name I N.

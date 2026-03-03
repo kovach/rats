@@ -420,7 +420,7 @@ impl Tuples {
                 parts.push(pp_tuple(&full, i));
             }
         }
-        format!("-- {}.", parts.join(",\n   "))
+        format!("-- {}.\n", parts.join(",\n   "))
     }
 
     pub fn to_json(&self, i: &Interner) -> String {

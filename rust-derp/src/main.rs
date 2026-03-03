@@ -42,12 +42,20 @@ fn bisect(rules: &[types::Rule], intern: &sym::Interner, timeout: Duration, reor
 
 fn main() {
     let args: Vec<String> = env::args().collect();
-    let filename = args.get(1).expect("usage: derp <file.derp> [--bisect] [--reorder]");
     let do_bisect = args.iter().any(|a| a == "--bisect");
     let reorder = args.iter().any(|a| a == "--reorder");
     let skip_out = args.iter().any(|a| a == "--no-write");
 
-    let input = fs::read_to_string(filename).expect("could not read file");
+    let filenames: Vec<&String> = args[1..].iter().filter(|a| !a.starts_with("--")).collect();
+    if filenames.is_empty() {
+        panic!("usage: derp <file.derp> [<file2.derp> ...] [--bisect] [--reorder] [--no-write]");
+    }
+    let filename = filenames[0];
+
+    let input = filenames.iter()
+        .map(|f| fs::read_to_string(f).unwrap_or_else(|_| panic!("could not read file: {}", f)))
+        .collect::<Vec<_>>()
+        .join("\n");
 
     let mut intern = sym::Interner::new();
     let rules = parse::parse(&input, &mut intern).expect("parse error");

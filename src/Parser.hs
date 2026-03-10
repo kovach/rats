@@ -19,7 +19,7 @@ pred = p
 var :: Parser T.Var
 var = v
   where
-    v = T.NegVar <$> variable
+    v = T.FreeVar <$> variable
 
 term :: Parser T.Term
 term = app <|> cv <|> fv <|> v <|> p <|> rand <|> b <|> n
@@ -39,9 +39,10 @@ mvar ty = do
   pure $ T.PVar mv Nothing
 
 pattern_ :: Parser T.Pattern
-pattern_ = q <|> a
+pattern_ = q <|> a <|> n
   where
-    q = char '?' *> ws *> (T.Pattern T.AtomNeg <$> mvar T.NegVar <*> (wsSep term))
+    q = char '?' *> ws *> (T.Pattern T.AtomFree <$> mvar T.FreeVar <*> (wsSep term))
+    n = char '¬' *> ws *> (T.Pattern T.AtomNeg <$> mvar T.FreeVar <*> (wsSep term))
     a = char '!' *> ws *> (T.Pattern T.AtomPos <$> mvar T.PosVar <*> (wsSep term))
     -- k = T.Pattern T.AtomAsk T.NoVars <$> (char '∃' *> wsSep term)
 
@@ -50,15 +51,15 @@ pattern_ = q <|> a
 --  where
 --    f (op, text) = ws *> text *> ws *>
 
--- e2 -> e2 ~> e1
--- e2 -> e1
--- e1 -> atom | parens e5
--- e2 -> e1 e'
--- e' -> . | ~> e1 e'
 expr1 :: Parser T.E
-expr1 = at <|> p <|> af <|> vr
+expr1 = at <|> p <|> af <|> vr <|> inst
   where
     at = T.Atom <$> pattern_
+    inst = braces $ do
+      l <- pattern_
+      _ <- ws *> string "->" *> ws
+      r <- expr
+      pure $ T.Instead l r
     p = parens $ expr
     af = T.After <$> (char '#' *> ws *> expr1)
     vr = T.EVar <$> term

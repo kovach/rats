@@ -23,7 +23,6 @@ import MMap (MMap)
 import qualified MMap as M
 import qualified Derp.Core as D
 import Derp.Parse
-import qualified GenSouffle as GS
 import qualified Derp.Gen as GD
 import Server (runServer)
 import Compile

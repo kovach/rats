@@ -3,7 +3,7 @@
 {-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE ConstraintKinds #-}
-module Compile (main1, main2, main3, runTest) where
+module Compile (main1, main2, main3) where
 
 import Prelude hiding (pred, exp, take)
 import Control.Monad.Writer
@@ -29,8 +29,17 @@ import MMap (MMap)
 import qualified MMap as M
 import qualified Derp.Core as D
 import qualified Derp.Parse as DP
-import qualified GenSouffle as GS
 import qualified Derp.Gen as GD
+
+data VarScope = VS (Set Var) (Set Var)
+  deriving (Eq, Show)
+instance PP VarScope where
+  pp (VS h b) = bwrap $ pp h <> ":" <> pp b
+ignoreCase h v = varName v `elem` (Set.map varName h)
+mergeVS (VS h1 b1) (VS h2 b2) =
+  let h = (h1 <> h2)
+      b = (b1 <> b2) & Set.filter (not . ignoreCase h)
+   in VS h b
 
 leftEnd t = L (TermVar t)
 rightEnd t = R (TermVar t)
@@ -43,7 +52,7 @@ freshAtomVar p | Just (Pred ('#':pr)) <- predPattern p = fresh $ capitalize pr
 freshAtomVar p | Just (Pred pr) <- predPattern p = fresh $ capitalize pr
 freshAtomVar _ = fresh "_id"
 
--- todo: negVars only
+-- todo: freeVars only
 vars :: E -> [Var]
 vars = nub . execWriter . eTraverse' go
   where
@@ -51,13 +60,13 @@ vars = nub . execWriter . eTraverse' go
     go (EVar t) = tell (termVars t)
     go _ = pure ()
 
-negVars :: E -> [Var]
-negVars = filter isNegVar . vars
+freeVars :: E -> [Var]
+freeVars = filter isFreeVar . vars
 posVars :: E -> [Var]
 posVars = filter isPosVar . vars
 
 patternBoundVars :: E -> [Var]
-patternBoundVars = filter isNegVar . nub . execWriter . eTraverse' go
+patternBoundVars = filter isFreeVar . nub . execWriter . eTraverse' go
   where
     go (Atom (Pattern _ _ ts)) = tell (termsVars ts)
     go _ = pure ()
@@ -75,10 +84,10 @@ schema = execWriter . eTraverse' go
 elabEVars e = eTraverse (pure . go) e
   where
     vs = map varName $ patternBoundVars e
-    go (EVar (TermVar (NegVar v))) =
+    go (EVar (TermVar (FreeVar v))) =
       if not (v `elem` vs)
          then EVar (TermVar (ExVar v))
-         else EVar (TermVar (NegVar v))
+         else EVar (TermVar (FreeVar v))
     go (EVar x) = trace ("!!! " <> show x<> " : " <> show vs) $ EVar x
     go x = x
 
@@ -86,18 +95,21 @@ elabCVars = eTermTraverse go
   where
     go (TermChoiceVar Nothing v) = do
       v' <- fresh (pp v)
-      pure (TermChoiceVar (Just $ NegVar v') v)
+      pure (TermChoiceVar (Just $ FreeVar v') v)
     go e = pure e
 
 ifNothing = flip fromMaybe
 
-elabNegAtoms ruleName e = eTraverse go e
+elabFreeAtoms ruleName e = eTraverse go e
   where
+    go (Atom p@(Pattern AtomFree (PVar mv Nothing) ts)) = do
+      mv' <- ifNothing mv <$> (FreeVar <$> freshAtomVar p);
+      -- let var = if isBuiltin ts then ExVar m else FreeVar m
+      pure $ Atom $ Pattern AtomFree (AllVars mv' ruleName) ts
     go (Atom p@(Pattern AtomNeg (PVar mv Nothing) ts)) = do
-      mv' <- ifNothing mv <$> (NegVar <$> freshAtomVar p);
-      -- let var = if isBuiltin ts then ExVar m else NegVar m
+      mv' <- ifNothing mv <$> (FreeVar <$> freshAtomVar p);
       pure $ Atom $ Pattern AtomNeg (AllVars mv' ruleName) ts
-    go (Atom (Pattern AtomNeg _ _)) = error ""
+    go (Atom (Pattern AtomFree _ _)) = error ""
     go e' = pure e'
 
 elabPosAtoms ruleName e = eTraverse go e
@@ -118,20 +130,21 @@ elabPosAtoms ruleName e = eTraverse go e
 --    go (TermFreshVar v) = pure $ TermId $ Id (ruleName <> ":" <> pp v) vs
 --    go e' = pure e'
 
-elab' r e = do
+elab' (TRule r e) = do
   -- mark existential variables,
   -- fresh names on choice vars,
   -- introduce bound variables
-  e1 <- pure e >>= elabEVars >>= elabCVars >>= elabNegAtoms r
+  e1 <- pure e >>= elabEVars >>= elabCVars >>= elabFreeAtoms r
   --let vs = negVars e1
   -- introduce fresh ids that capture the negVars for
   --   positive atoms, and
   --   `TermFreshVar` instances
-  elabPosAtoms r e1
+  e2 <- elabPosAtoms r e1
+  pure $ TRule r e2
     -- >>= elabPosVars r
 
-elab :: (Name, E) -> E
-elab = evalM . uncurry elab'
+elab :: TRule -> TRule
+elab = evalM . elab'
 
 type MonadPatternWriter m = MonadWriter [Constraint] m
 
@@ -142,25 +155,23 @@ checkTerm = \case
   _ -> pure ()
 
 check :: MonadPatternWriter m => E -> m I
-check (Atom p@(Pattern AtomNeg (AllVars v@(ExVar _) _) ts)) | isBuiltin ts = do
+check (Atom p@(Pattern AtomFree (AllVars v@(ExVar _) _) ts)) | isBuiltin ts = do
   mapM_ checkTerm ts
   tell [Constraint p]
   pure (I (leftEnd v) (rightEnd v))
-check (Atom (Pattern AtomNeg (AllVars _ _) ts)) | isBuiltin ts = error ""
-check (Atom p@(Pattern sign (AllVars v name) ts)) = do
+check (Atom (Pattern AtomFree (AllVars _ _) ts)) | isBuiltin ts = error ""
+check (Atom p@(Pattern sign (AllVars v _name) ts)) = do
   mapM_ checkTerm ts
   case sign of
-    AtomPos -> do
-      tell [Constraint p, (leftEnd v) `Lt` (rightEnd v)]
-    AtomNeg -> do
-      tell [Constraint p, (leftEnd v) `Lt` (rightEnd v)]
-    AtomAsk -> do
-      tell [Try p, (leftEnd v) `Lt` (rightEnd v)]
+    AtomPos  -> tell [Constraint p, (leftEnd v) `Lt` (rightEnd v)]
+    AtomFree -> tell [Constraint p, (leftEnd v) `Lt` (rightEnd v)]
+    AtomAsk  -> tell [Try p, (leftEnd v) `Lt` (rightEnd v)]
+    AtomNeg  -> tell [Constraint p]
   pure (I (leftEnd v) (rightEnd v))
+check (Atom p) = error $ pp p
 check (EVar t) = do
   tell [L t `Lt` R t]
   pure $ I (L t) (R t)
-check (Atom p) = error $ pp p
 check (After e) = do
   I _ ar <- check e
   pure $ I ar Top
@@ -203,11 +214,7 @@ check (SameIsh a b) = do
   I bl br <- check b
   tell [al `Lt` bl, ar `Eql` br]
   pure $ I al ar
-check (Instead a b) = do
-  I al ar <- check a
-  I bl br <- check b
-  tell [al `Eql` bl, ar `Eql` br]
-  pure $ I al ar
+check (Instead{}) = error "unreachable. Instead is pre-processed."
 
 checkAll :: E -> [Constraint]
 checkAll = snd . runWriter . check
@@ -298,7 +305,7 @@ tContainsId vs = \case
   Bot -> False
 
 isPos _vs (Constraint (Pattern AtomPos _ _)) = True
-isPos _vs (Constraint (Pattern{})) = False
+isPos _vs (Constraint _) = False
 isPos _vs (Eq _ _) = False
 isPos _vs (Val _ _) = False
 isPos vs (Cmp _ a b) = any (tContainsId vs) [a,b]
@@ -352,24 +359,13 @@ toLes cs = result
     isEq = \case Cmp OpEq a b -> ofList [(a,b), (b,a)]; _ -> none
     clist = Set.toList cs
     vs0 = Set.fromList $ do
-      Constraint (Pattern AtomNeg (PVar (Just v) _) ts) <- clist
+      Constraint (Pattern AtomFree (PVar (Just v) _) ts) <- clist
       v' <- termsVars ts
       pure (L (TermVar v), L (TermVar v'))
     vs1 = Set.fromList $ do
       Constraint (Pattern _ (PVar (Just v) _) ts) <- clist
       v' <- termsVars ts
       pure (L (TermVar v'), L (TermVar v))
-
-ignoreCase h v = varName v `elem` (Set.map varName h)
-
-data VarScope = VS (Set Var) (Set Var)
-  deriving (Eq, Show)
-instance PP VarScope where
-  pp (VS h b) = bwrap $ pp h <> ":" <> pp b
-mergeVS (VS h1 b1) (VS h2 b2) =
-  let h = (h1 <> h2)
-      b = (b1 <> b2) & Set.filter (not . ignoreCase h)
-   in VS h b
 
 depVarSets :: [Constraint] -> [VarScope]
 depVarSets cs = mergeSeq . map removeHead . mergeIdentical $ ans
@@ -415,14 +411,14 @@ groupScope (VS heads deps) = splitConstraints heads . map fix . sub . quantElimC
     sub = filter (\c -> constraintVars c `subset` allVars)
     subset x y = all (`elem` y) x
     fix (Constraint (Pattern AtomPos (AllVars v n) ts)) | v `elem` deps =
-      Constraint (Pattern AtomNeg (AllVars v n) ts)
+      Constraint (Pattern AtomFree (AllVars v n) ts)
     fix x = x
 
 groupScopes :: [VarScope] -> [Constraint] -> [Rule]
 groupScopes vs cs = map (\v -> groupScope v cs) vs
 
 -- fixScopes :: [Constraint] -> [Rule]
-fixScopes n c = groupScopes deps $ addScopes n deps <> c <> newLts
+fixScopes n c = groupScopes deps $ addScopes n deps <> c <> newLts -- TODO: breaks ~
   where
     deps = depVarSets c
     newLts = do
@@ -437,7 +433,7 @@ fixScopes n c = groupScopes deps $ addScopes n deps <> c <> newLts
         f (Constraint (Pattern _ (PVar (Just v) _) _)) = Just v
         f _ = Nothing
 
-generateConstraints n e = trace (unlines $ map pp sets) c'
+generateConstraints (TRule n e) = trace (unlines $ map pp sets) c'
   where
     c' = fixScopes n c
     c = expandConstraints
@@ -454,6 +450,57 @@ generateConstraints' e = splitConstraints (posVars e)
   . expandConstraints
   . checkAll $ e
 
+exceptionPredicates :: E -> [(Pred, E)]
+exceptionPredicates = nub . execWriter . eTraverse' go
+  where
+    go (Instead (PP l _) r) = tell [(l,r)]
+    go _ = pure ()
+
+rewritePredicate from to = eMap fix
+  where
+    fix (Atom (PPP p a b c)) | from == p = Atom $ PPP to a b c
+    go x = x
+
+-- note: exception condition cannot depend on
+rewriteOneException name' p = eMap fix
+  where
+    -- should handle several by matching on LHS/(name', p) pairs
+    fix (Instead (PPP _ a b c) _) = Same (Atom (PPP name' a b c)) (Atom (PPP p AtomPos noPVar [{-TODO-}]))
+    fix x = x
+
+-- An exception rewrites a *target* conditionally
+-- implemented by three rules:
+--   - property asserts the condition
+--   - default generates the target when condition fails to hold
+--   - exception generates the alternate when condition does hold
+-- Applied before all other passes, so allowed to generate unelaborated Turn rules.
+handleExceptions :: [TRule] -> [TRule]
+handleExceptions trs = result
+  where
+    result = reverse $ foldl' step acc trs
+    acc = []
+    shift n (Pred name) = Pred $ name <> "/" <> n
+    targets = exceptionPredicates
+    step es tr@(TRule n e) =
+        case targets e of
+          [] -> tr:es
+          [(x,rhs)] -> newRules x rhs tr <> map (trMap $ rewritePredicate x (shift n x)) es
+          _ -> error "todo"
+    newRules p rhs (TRule n e) = [ property, default_, exception ]
+      where
+        p' = shift n p
+        checkName = Pred $ "exn/" <> n
+        property = TRule (n <> "/prop") $ rewriteOneException p' checkName e
+        default_ = TRule (n <> "/default") $ sames $
+          [ Atom (PPP p' AtomFree NoVars [])  -- todo handle parameters to target
+          , (Atom (PPP checkName AtomNeg NoVars [])) -- todo handle parameters to prop
+          , Atom (PPP p AtomPos NoVars []) ]
+        exception = TRule (n <> "/exception") $ sames $
+          [ Atom (PPP p' AtomFree NoVars [])
+          , (Atom (PPP checkName AtomFree NoVars []))
+          , rhs ]
+        sames = foldl1' Same
+
 -- Remove `L a < R a` checks from rule bodies.
 simplRule :: Rule -> Rule
 simplRule (Rule {body, head}) = Rule {body = body', head = head'}
@@ -463,10 +510,10 @@ simplRule (Rule {body, head}) = Rule {body = body', head = head'}
     ok (Cmp OpLt (L a) (R b)) | a == b = False
     ok _ = True
 
-compileExp :: (Name, E) -> [Rule]
-compileExp pr@(n, _) = rs -- <> tryPatterns
+compileExp :: TRule -> [Rule]
+compileExp pr@(TRule n _) = rs -- <> tryPatterns
   where
-    rs = map simplRule . generateConstraints n . elab $ pr
+    rs = map simplRule . generateConstraints . elab $ pr
     --r@(Rule _ h) = generateConstraints . elab $ pr
     --tryPatterns = mapMaybe fixTry $ Set.toList h
     --fixTry (Try p) = error ""
@@ -476,25 +523,35 @@ compileExp pr@(n, _) = rs -- <> tryPatterns
       --  b' = Set.fromList $ [Try p', NegChose x]
       --  h' = Set.fromList $ [Constraint p']
     --fixTry _ = Nothing
-    --x = NegVar "X"
+    --x = FreeVar "X"
     -- freshPattern (Pattern sign (AllVars _ ds n) (p : vs)) =
     --   Pattern sign (AllVars x ds n) ts'
     --     where
-    --       ts' = p : (map (\i -> TermVar $ NegVar $ "X" <> show i) [1.. length vs])
+    --       ts' = p : (map (\i -> TermVar $ FreeVar $ "X" <> show i) [1.. length vs])
     -- freshPattern _ = error ""
 
-compile :: [Statement] -> String
-compile ps = result
+data CompilationRec = CompilationRec
+  { crResult :: String
+  , crElab :: String
+  }
+
+compile :: [Statement] -> CompilationRec
+compile ps = CompilationRec { crResult = result, crElab = elaborated }
   where
     (ops, es) = partitionEithers $ map isOp ps
+
+    -- todo: not in use
     isOp (Pragma p) = Left p
-    isOp (RuleStatement (Just n) e) = Right (n,e)
+    isOp (RuleStatement (Just n) e) = Right $ TRule n e
     isOp (RuleStatement Nothing _) = error ""
     notBasic (pr, _) = not (pr `elem` map Pred ["move", "at"])
-    sch = filter notBasic $ nub $ concatMap (schema . snd) es
+    sch = filter notBasic $ nub $ concatMap (schema . trE) es
+
+    excepted = handleExceptions es
+    elaborated = unlines $ map pp $ map elab $ excepted
     result = unlines $
       map (GD.schemaCompile ops) sch
-      <> map (\e -> GD.ruleBlockCompile e (compileExp e)) es
+      <> map (\e -> GD.ruleBlockCompile e (compileExp e)) excepted
 
 mkFile path p = do
   prelude <- GD.readPrelude
@@ -503,14 +560,14 @@ mkFile path p = do
 demo name rules = do
     case find (byName) rules of
       Just (RuleStatement _ r) -> do
-        let f = (name, r)
+        let f = TRule name r
         --let f = (name, fromJust $ lookup name rules)
-        pprint $ snd f
+        pprint $ r
         putStrLn "~~~~~~~~~"
         let f' = elab f
         pprint f'
         putStrLn "~~~~~~~~~"
-        let Rule body h = generateConstraints' f' -- todo
+        let Rule body h = generateConstraints' $ trE f' -- todo
         mapM_ pprint body
         putStrLn "---------"
         mapM_ pprint h
@@ -527,17 +584,18 @@ genDerp base = do
       name n (RuleStatement Nothing r) = RuleStatement (Just n) r
       name _ x = x
   let rules = zipWith name [ "r" <> show i | i <- [1..] ] ttt
-  let ruleText = compile rules
+  let CompilationRec {crResult, crElab} = compile rules
   prelude <- GD.readPrelude
-  let result = prelude <> ruleText
-  pure (result, ruleText)
+  let result = prelude <> crResult
+  pure (result, crElab, crResult)
 
 main1 :: String -> IO String
 main1 base = do
-  (result, ruleText) <- genDerp base
+  (result, elabText, ruleText) <- genDerp base
   putStrLn $ "generated derp:\n" <> ruleText
   let outFile = (base ++ ".derp")
   writeFile outFile result
+  writeFile (base ++ ".elab.turn") elabText
   putStrLn $ "wrote file " <> outFile
   pure result
 
@@ -563,10 +621,10 @@ main3 = do
   str <- main1 "ttt"
   main2' str
 
-runTest base = do
-  (result, rules) <- genDerp base
-  writeFile "tmp.derp" result
-  putStrLn rules
+-- runTest base = do
+--   (result, _, rules) <- genDerp base
+--   writeFile "tmp.derp" result
+--   putStrLn rules
 
 -- TODO
 -- error handling

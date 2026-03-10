@@ -72,7 +72,7 @@ executable rats
       , Compile
       , Parser
       , Derp.Types, Derp.Core, Derp.Parse
-      , GenSouffle, Derp.Gen
+      , Derp.Gen
       , Server
       , DrawDiagram.Core, DrawDiagram.Layout
 

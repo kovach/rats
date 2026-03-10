@@ -2,6 +2,7 @@
 module Types where
 
 import Control.Monad.State
+import Data.Functor.Identity
 import Data.Monoid (Sum(..))
 import Data.Char
 import Data.List
@@ -17,13 +18,13 @@ import Basic
 type Name = String
 data Global = Global Name Name
 -- TODO: still needed?
-data Var = NegVar Name | PosVar Name | ExVar Name
+data Var = FreeVar Name | PosVar Name | ExVar Name
   deriving (Show, Eq, Ord)
-isNegVar = \case NegVar _ -> True; _ -> False
+isFreeVar = \case FreeVar _ -> True; _ -> False
 isPosVar = \case PosVar _ -> True; _ -> False
 isExVar = \case ExVar _ -> True; _ -> False
 varName = \case
-    NegVar v -> v
+    FreeVar v -> v
     PosVar v -> v
     ExVar  v -> v
 data Id = Id Name [Var]
@@ -51,9 +52,10 @@ opIneq = \case
   OpLt -> True
   OpEq -> False
 data AtomType
-  = AtomNeg
+  = AtomFree
   | AtomPos
   | AtomAsk
+  | AtomNeg
   deriving (Show, Eq, Ord)
 
 data PVar
@@ -62,11 +64,17 @@ data PVar
          , pname :: Maybe Name }
   deriving (Show, Eq, Ord)
 
+noPVar = PVar Nothing Nothing
+
 pattern NoVars = PVar Nothing Nothing
 pattern AllVars a c = PVar (Just a) (Just c)
 
 data Pattern = Pattern { ty :: AtomType, id :: PVar, terms :: [Term] }
   deriving (Show, Eq, Ord)
+
+pattern PP p ts <- Pattern _ _ (TermPred p : ts)
+pattern PPI p s i ts <- Pattern s (PVar (Just i) _) (TermPred p : ts)
+pattern PPP p a b ts = Pattern a b (TermPred p : ts)
 
 data E = Atom Pattern
        | EVar Term
@@ -79,21 +87,26 @@ data E = Atom Pattern
        | SameIsh E E
        | At E E
        | Under E E
-       | Instead E E
+       | Instead Pattern E
   deriving (Show, Eq, Ord)
 
 data Constraint
   = Constraint Pattern
   | Cmp Op T T
   | Eq Term Term
+  | Other [Term]
+  -- TODO: remove these
   | IsId Term
   | Val Term Term
   | Try Pattern
-  | Other [Term]
   deriving (Show, Eq, Ord)
 
 pattern Lt a b = Cmp OpLt a b
 pattern Eql a b = Cmp OpEq a b
+
+data TRule = TRule { trName :: Name, trE :: E }
+
+trMap f (TRule n e) = TRule n (f e)
 
 -- todo: generate count summary for each Pragma
 data Statement = Pragma Pred | RuleStatement (Maybe Name) E
@@ -108,8 +121,9 @@ type M a = Ms String (Sum Int) a
 type MonadFreshVarState m = MonadState (MMap String (Sum Int)) m
 
 isPositive AtomPos = True
-isPositive AtomNeg = False
+isPositive AtomFree = False
 isPositive AtomAsk = False
+isPositive AtomNeg = False
 
 evalM m = evalState m M.empty
 
@@ -138,7 +152,7 @@ instance PP Pred where
   pp (Pred s) = fixId s
 instance PP Var where
   pp = fixId . \case
-    NegVar v -> v
+    FreeVar v -> v
     PosVar v -> v
     ExVar v -> "-" <> v
 instance PP Term where
@@ -150,11 +164,12 @@ instance PP Term where
   pp (TermChoiceVar _ v) = "?" <> pp v
   pp (TermExt s) = s
   pp TermBlank = "_"
-  pp t@(TermApp _ _) = show t
+  pp (TermApp c ts) = c <> args (map pp ts)
 instance PP AtomType where
-  pp AtomNeg = "?"
+  pp AtomFree = "?"
   pp AtomPos = "!"
   pp AtomAsk = "∃"
+  pp AtomNeg = "¬"
 instance PP PVar where
   pp NoVars = ""
   pp (PVar pv _mn) = bwrap $ mpp pv -- <> "=" <> mpp (do { n <- mn; vs <- pvs; pure $ Id n vs })
@@ -163,7 +178,7 @@ instance PP PVar where
       mpp = maybe "" pp
 instance PP Pattern where
   pp (Pattern sign pv c) =
-    pp sign <> pp pv <> (pwrap . unwords . map pp $ c)
+    pp sign <> pp pv <> (unwords . map pp $ c)
 instance PP Constraint where
   pp (Constraint p) = pp p
   pp (Other ts) = pp ts
@@ -177,7 +192,7 @@ instance PP Op where
   pp OpEq = "="
 instance PP E where
   pp (Atom p) = pp p
-  pp (After e) = ">" <> pp e
+  pp (After e) = "#" <> pp e
   pp (EVar e) = pp e
   pp (And a b) = pwrap $ pp a <> ", " <> pp b
   pp (Seq a b) = pwrap $ pp a <> "; " <> pp b
@@ -188,6 +203,8 @@ instance PP E where
   pp (At a b) = pwrap $ pp a <> " @ " <> pp b
   pp (SameIsh a b) = pwrap $ pp a <> " ~> " <> pp b
   pp (Instead a b) = pwrap $ pp a <> " -> " <> pp b
+instance PP TRule where
+  pp (TRule n e) = n <> ": " <> pp e <> "."
 
 tryPred = "try__"
 chosePred = "chose__"
@@ -197,7 +214,8 @@ eTraverse f = go
   where
     go e@(Atom _) = f e
     go e@(EVar _) = f e
-    go (After e) = After <$> go e
+    go e@(Instead _ _) = f e -- TODO
+    go (After e) = (After <$> go e)
     go (And a b) = And <$> (go a) <*> (go b)
     go (Seq a b) = Seq <$> (go a) <*> (go b)
     go (Par a b) = Par <$> (go a) <*> (go b)
@@ -206,7 +224,9 @@ eTraverse f = go
     go (Same a b) = Same <$> (go a) <*> (go b)
     go (At a b) = At <$> (go a) <*> (go b)
     go (SameIsh a b) = SameIsh <$> (go a) <*> (go b)
-    go (Instead a b) = Instead <$> (go a) <*> (go b)
+
+eMap :: (E -> E) -> E -> E
+eMap f = runIdentity . eTraverse (pure . f)
 
 eTraverse' :: Applicative m => (E -> m ()) -> E -> m ()
 eTraverse' f e0 = eTraverse (\e -> f e *> pure e) e0 *> pure ()
@@ -234,9 +254,6 @@ tTraverse f =  go
     go Bot = f Bot
     go (Min a b) = Min <$> go a <*> go b
     go (Max a b) = Max <$> go a <*> go b
-
-pattern PP p ts <- Pattern _ _ (TermPred p : ts)
-pattern PPI p i ts <- Pattern _ (PVar (Just i) _) (TermPred p : ts)
 
 patternVars (Pattern _ (PVar i _) ts) = maybeToList i <> termsVars ts
 termsVars = concatMap termVars

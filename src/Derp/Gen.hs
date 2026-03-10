@@ -21,10 +21,14 @@ import Parser
 import ParserCombinator
 import MMap (MMap)
 
-patternCompileDot = (<> ".") . patternCompile
 patternCompile :: Pattern -> String
 patternCompile = \case
-  PPI p i ts -> spaces (pp p : pp i : map termCompile ts)
+  pat@(PPI p sign i ts) ->
+    case sign of
+      AtomNeg -> "!" <> spaces (pp p : pp i : map termCompile ts)
+      AtomPos -> spaces (pp p : pp i : map termCompile ts)
+      AtomFree -> spaces (pp p : pp i : map termCompile ts)
+      AtomAsk -> error $ show pat
   p@(Pattern {}) -> error $ pp p
 constraintCompile :: Constraint -> String
 constraintCompile = \case
@@ -35,7 +39,7 @@ constraintCompile = \case
   Eq a b -> spaces [termCompile a, "=", termCompile b]
   IsId t -> spaces ["isId", termCompile t]
   Val a b -> spaces ["val", termCompile a, termCompile b]
-  Try (PPI p i ts) -> spaces [tryPred, cons (pp p) (pp i : termsCompile ts)]
+  Try (PPI p _ i ts) -> spaces [tryPred, cons (pp p) (pp i : termsCompile ts)]
   Try p -> error $ show p
 opString OpLt = "lt"
 opString OpEq = "eq"
@@ -58,8 +62,6 @@ termCompile = \case
 termsCompile = map termCompile
 idCompile (Id n vs) = cons "id" [show n, toBinding vs]
 toBinding ts = cons "bind" (map pp ts)
---toBinding [] = cons "nil" []
---toBinding (t:ts) = cons "bind" [pp t, toBinding ts]
 tCompile = \case
   L t -> cons "l" [termCompile t]
   R t -> cons "r" [termCompile t]
@@ -76,7 +78,7 @@ chunkAtoms xs =
         [] -> commas h
         _ -> commas h <> ",\n" <> chunkAtoms t
 
-ruleBlockCompile (name, original) rules =
+ruleBlockCompile (TRule name original) rules =
   let comment = "; " <> name <> ": " <> pp original <> "\n" in
   comment <> unlines (map ruleCompile rules)
 

@@ -1,0 +1,4 @@
+; expects 1 tuple
+x, !p -- q.
+x, !q -- p.
+-- x.

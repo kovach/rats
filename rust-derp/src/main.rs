@@ -3,6 +3,7 @@ use derp::{sym, types, core, parse};
 use std::collections::HashSet;
 use std::env;
 use std::fs;
+use std::io::stdout;
 use std::time::{Duration, Instant};
 
 fn run_with_rules(rules: &[types::Rule], intern: &sym::Interner, timeout: Duration, reorder: bool) -> Result<types::Tuples, Duration> {
@@ -45,6 +46,7 @@ fn main() {
     let do_bisect = args.iter().any(|a| a == "--bisect");
     let reorder = args.iter().any(|a| a == "--reorder");
     let skip_out = args.iter().any(|a| a == "--no-write");
+    let std_out = args.iter().any(|a| a == "--std-out");
 
     let filenames: Vec<&String> = args[1..].iter().filter(|a| !a.starts_with("--")).collect();
     if filenames.is_empty() {
@@ -78,6 +80,10 @@ fn main() {
         if !skip_out {
             fs::write(&json_path, result.to_json_with_table(&intern, &table)).expect("could not write json");
             fs::write(&derp_path, result.pp_derp_with_table(&intern, &table)).expect("could not write derp");
+        }
+
+        if std_out {
+            eprintln!("result:\n{}", result.pp_derp_with_table(&intern, &table))
         }
 
         eprintln!("{} tuples, wrote {} and {}", result.size(), json_path, derp_path);

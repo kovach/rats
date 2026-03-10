@@ -28,3 +28,12 @@ fn neg_ex_test_1() {
     let (tuples, _table, _stats) = core::iter_rules(HashSet::new(), rules, &intern, false, vec![]);
     assert_eq!(tuples.size(), 6);
 }
+
+#[test]
+fn neg_circ_test_1() {
+    let input = include_str!("data/circle.derp");
+    let mut intern = sym::Interner::new();
+    let rules = parse::parse(input, &mut intern).expect("parse");
+    let (tuples, _table, _stats) = core::iter_rules(HashSet::new(), rules, &intern, false, vec![]);
+    assert_eq!(tuples.size(), 1);
+}

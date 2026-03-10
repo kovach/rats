@@ -11,3 +11,5 @@ rats.ps
 tmp*
 diagrams/*.svg
 diagrams/*.pdf
+rust-derp/target/
+target/

@@ -72,8 +72,12 @@ impl<'a> Parser<'a> {
         }
     }
 
+    fn is_id_special_char(c: char) -> bool {
+        c == '-' || c == '/' || c == '_' || c == '\''
+    }
+
     fn is_id_char(c: char) -> bool {
-        c.is_alphanumeric() || c == '-' || c == '/' || c == '_' || c == '\''
+        c.is_alphanumeric() || Self::is_id_special_char(c)
     }
 
     fn predicate(&mut self) -> PResult<String> {

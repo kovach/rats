@@ -613,9 +613,7 @@ pub fn iter(
                 for tuple in head_tuples {
                     if !db.contains_tuple(tuple) {
                         worklist.push_back(tuple.clone());
-                        if !base.contains_tuple(tuple) {
-                            changed = true;
-                        }
+                        if !base.contains_tuple(tuple) { changed = true; }
                     }
                 }
             }
@@ -633,6 +631,7 @@ pub fn alt_iter(
     ts0: &HashSet<Tuple>,
     f: &mut dyn FnMut(&Tuple, &Tuples, &Tuples) -> Vec<Vec<Tuple>>,
     v: &Tuples,
+    intern: &Interner,
 ) -> Tuples {
     if gas == 0 {
         panic!("gas exhausted");
@@ -643,18 +642,22 @@ pub fn alt_iter(
     // First forward pass
     let mut wl1: Worklist = ts0.iter().cloned().collect();
     let mut db1 = v.empty_clone();
-    let gen1 = iter(f, &mut wl1, &mut db1, v, v);
+    let gen1 = iter(f, &mut wl1, &mut db1, v, v); // on first run: everything treated as false
+                                                  // yields over-approx of solution
 
+    // eprintln!("db1({}): {}", gen1, db1.pp_derp(intern));
     if !gen1 { return db1 };
 
     // Second forward pass
     let mut wl2: Worklist = ts0.iter().cloned().collect();
     let mut db2 = v.empty_clone();
-    let gen2 = iter(f, &mut wl2, &mut db2, v, &db1);
+    let gen2 = iter(f, &mut wl2, &mut db2, v, &db1); // anything outside db1 (over-approx) treated as false.
+                                                     // yields under-approx of solution
 
+    // eprintln!("db2({}): {}", gen2, db2.pp_derp(intern));
     if !gen2 { return db2 };
 
-    alt_iter(gas - 1, ts0, f, &db2)
+    alt_iter(gas - 1, ts0, f, &db2, intern)
 }
 
 // -- iter_rules --------------------------------------------------
@@ -703,7 +706,7 @@ pub fn iter_rules(initial: HashSet<Tuple>, all_rules: Vec<Rule>, intern: &Intern
     };
 
     let template = Tuples::with_indices(index_specs);
-    let tuples = alt_iter(10, &ts0, &mut f, &template);
+    let tuples = alt_iter(10, &ts0, &mut f, &template, intern);
     drop(f);
     let tbl = Rc::try_unwrap(table).unwrap().into_inner();
     let st = Rc::try_unwrap(stats).unwrap().into_inner();

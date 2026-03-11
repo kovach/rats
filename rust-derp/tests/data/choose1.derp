@@ -1,0 +1,6 @@
+-- choose ?x,
+   is x bar.
+
+choose foo -- a.
+choose bar -- b.
+choose bar -- d.

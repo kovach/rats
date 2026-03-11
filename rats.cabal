@@ -71,9 +71,13 @@ executable rats
       , Types
       , Compile
       , Parser
+      , CatShelf
+
       , Derp.Types, Derp.Core, Derp.Parse
       , Derp.Gen
+
       , Server
+
       , DrawDiagram.Core, DrawDiagram.Layout
 
     -- LANGUAGE extensions used by modules in this package.

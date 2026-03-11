@@ -30,6 +30,10 @@ impl Interner {
     pub fn resolve(&self, sym: Sym) -> &str {
         &self.vec[sym.0 as usize]
     }
+
+    pub fn get(&self, s: &str) -> Option<Sym> {
+        self.map.get(s).copied()
+    }
 }
 
 impl fmt::Debug for Sym {

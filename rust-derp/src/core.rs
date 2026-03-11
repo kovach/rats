@@ -153,10 +153,10 @@ impl EvalStats {
 
 // -- eval_rule ----------------------------------------------------------------
 
-pub fn eval_rule(rule: &Rule, ts: &Tuples, check: &Tuples, table: &mut TermTable, stats: &mut EvalStats) -> Vec<Vec<Tuple>> {
+pub fn eval_rule(rule: &Rule, ts: &Tuples, check: &Tuples, table: &mut TermTable, stats: &mut EvalStats, is_sym: Option<Sym>) -> Vec<Vec<Tuple>> {
     let mut results = Vec::new();
     let mut slots = vec![ablank(); 30]; // TODO
-    for final_slots in eval_flat(&mut slots, &rule.body.val.flatten(), ts, check, table, stats) {
+    for final_slots in eval_flat(&mut slots, &rule.body.val.flatten(), ts, check, table, stats, is_sym) {
         // Substitute head
         let head_tuples: Vec<Tuple> = rule.head.iter().map(|ht| {
             sub_terms_compiled(&final_slots, ht, table)
@@ -186,6 +186,7 @@ fn compile_term(t: &ATerm, seen: &mut HashMap<Sym, u16>, next_slot: &mut u16) ->
             let cargs: Vec<ATerm> = args.iter().map(|a| compile_term(a, seen, next_slot)).collect();
             aapp(cons.clone(), cargs)
         }
+        Term::Choice(inner) => achoice(compile_term(inner, seen, next_slot)),
         _ => t.clone(),  // Pred, Num, Blank, Str are unchanged
     }
 }
@@ -223,7 +224,7 @@ fn compile_expr(expr: &Expr, seen: &mut HashMap<Sym, u16>, next_slot: &mut u16) 
 
 fn is_groundable(t: &ATerm) -> bool {
     match t.as_ref() {
-        Term::Var(VarOp::Set(_)) | Term::Blank => false,
+        Term::Var(VarOp::Set(_)) | Term::Blank | Term::Choice(_) => false,
         Term::App(_, args) => args.iter().all(is_groundable),
         _ => true,
     }
@@ -248,7 +249,26 @@ fn term_is_groundable(vs: &[ATerm], pred: Sym, tuples: &Tuples) -> AtomLookup {
     AtomLookup::None
 }
 
-fn match_term_compiled(slots: &mut Vec<ATerm>, pat: &ATerm, val: &ATerm, table: &TermTable) -> bool {
+fn match_term_compiled(slots: &mut Vec<ATerm>, pat: &ATerm, val: &ATerm, check: &Tuples, is_sym: Option<Sym>, table: &TermTable) -> bool {
+    // Handle Choice cases before dispatching on pat alone
+    match (pat.as_ref(), val.as_ref()) {
+        (Term::Choice(pt), Term::Choice(vt)) => {
+            return match_term_compiled(slots, pt, vt, check, is_sym, table);
+        }
+        (Term::Choice(_), _) => return false,
+        (_, Term::Choice(key)) => {
+            if let Some(sym) = is_sym {
+                for tuple in check.lookup(&sym) {
+                    if tuple.len() >= 2 && tuple[0] == *key {
+                        let v = &tuple[1];
+                        return match_term_compiled(slots, pat, v, check, is_sym, table);
+                    }
+                }
+            }
+            return false;
+        }
+        _ => {}
+    }
     match pat.as_ref() {
         Term::Var(VarOp::Set(i)) => {
             slots[*i as usize] = val.clone();
@@ -269,7 +289,7 @@ fn match_term_compiled(slots: &mut Vec<ATerm>, pat: &ATerm, val: &ATerm, table: 
             match val_unfolded.as_ref() {
                 Term::App(cons2, args2) if cons == cons2 && args.len() == args2.len() => {
                     for (cp, av) in args.iter().zip(args2.iter()) {
-                        if !match_term_compiled(slots, cp, av, table) {
+                        if !match_term_compiled(slots, cp, av, check, is_sym, table) {
                             return false;
                         }
                     }
@@ -279,13 +299,14 @@ fn match_term_compiled(slots: &mut Vec<ATerm>, pat: &ATerm, val: &ATerm, table: 
             }
         }
         Term::Id(_) => panic!("match_term_compiled: Term::Id in pattern position"),
+        Term::Choice(_) => unreachable!("Choice handled above"),
     }
 }
 
-fn match_terms_compiled(slots: &mut Vec<ATerm>, pattern: &[ATerm], tuple: &[ATerm], table: &TermTable) -> bool {
+fn match_terms_compiled(slots: &mut Vec<ATerm>, pattern: &[ATerm], tuple: &[ATerm], check: &Tuples, is_sym: Option<Sym>, table: &TermTable) -> bool {
     if pattern.len() != tuple.len() { return false; }
     for (p, v) in pattern.iter().zip(tuple.iter()) {
-        if !match_term_compiled(slots, p, v, table) { return false; }
+        if !match_term_compiled(slots, p, v, check, is_sym, table) { return false; }
     }
     true
 }
@@ -299,6 +320,7 @@ fn sub_term_compiled(slots: &[ATerm], t: &ATerm, table: &mut TermTable) -> ATerm
             table.store(cons.clone(), new_args)
         }
         Term::Id(_) => t.clone(),  // already interned, pass through
+        Term::Choice(inner) => achoice(sub_term_compiled(slots, inner, table)),
         _ => t.clone(),  // Pred, Num, Blank, Str are unchanged
     }
 }
@@ -314,9 +336,10 @@ fn eval_flat(
     check: &Tuples,
     table: &mut TermTable,
     stats: &mut EvalStats,
+    is_sym: Option<Sym>,
 ) -> Vec<Vec<ATerm>> {
     let mut bs = vec![];
-    eval_flat0(0, slots, &expr, tuples, check, &mut bs, table, stats);
+    eval_flat0(0, slots, &expr, tuples, check, &mut bs, table, stats, is_sym);
     bs
 }
 
@@ -329,6 +352,7 @@ fn eval_flat0(
     result: &mut Vec<Vec<ATerm>>,
     table: &mut TermTable,
     stats: &mut EvalStats,
+    is_sym: Option<Sym>,
 ) {
     if idx == expr.len() {
         result.push(slots.clone());
@@ -349,23 +373,23 @@ fn eval_flat0(
                     *stats.ground.entry(pred).or_insert(0) += 1;
                     let key = sub_terms_compiled(slots, vs, table);
                     if tuples.contains(pred, &key) {
-                        eval_flat0(idx+1, slots, expr, tuples, check, result, table, stats);
+                        eval_flat0(idx+1, slots, expr, tuples, check, result, table, stats, is_sym);
                     }
                 }
                 AtomLookup::SomeIndex(i) => {
                     let val = sub_term_compiled(slots, &vs[i], table);
                     for stored_tuple in tuples.lookup_col(pred, i, &val) {
                         *stats.scan.entry(pred).or_insert(0) += 1;
-                        if match_terms_compiled(slots, vs, stored_tuple, table) {
-                            eval_flat0(idx+1, slots, expr, tuples, check, result, table, stats);
+                        if match_terms_compiled(slots, vs, stored_tuple, check, is_sym, table) {
+                            eval_flat0(idx+1, slots, expr, tuples, check, result, table, stats, is_sym);
                         }
                     }
                 }
                 AtomLookup::None => {
                     for stored_tuple in tuples.lookup(&pred) {
                         *stats.scan.entry(pred).or_insert(0) += 1;
-                        if match_terms_compiled(slots, vs, stored_tuple, table) {
-                            eval_flat0(idx+1, slots, expr, tuples, check, result, table, stats);
+                        if match_terms_compiled(slots, vs, stored_tuple, check, is_sym, table) {
+                            eval_flat0(idx+1, slots, expr, tuples, check, result, table, stats, is_sym);
                         }
                     }
                 }
@@ -376,16 +400,16 @@ fn eval_flat0(
             match x.as_ref() {
                 Term::Var(VarOp::Set(i)) => {
                     slots[*i as usize] = y_sub;
-                    eval_flat0(idx+1, slots, expr, tuples, check, result, table, stats);
+                    eval_flat0(idx+1, slots, expr, tuples, check, result, table, stats, is_sym);
                 }
                 Term::Var(VarOp::Check(i)) => {
                     if slots[*i as usize] == y_sub {
-                        eval_flat0(idx+1, slots, expr, tuples, check, result, table, stats);
+                        eval_flat0(idx+1, slots, expr, tuples, check, result, table, stats, is_sym);
                     }
                 }
                 _ => {
-                    if match_term_compiled(slots, x, &y_sub, table) {
-                        eval_flat0(idx+1, slots, expr, tuples, check, result, table, stats);
+                    if match_term_compiled(slots, x, &y_sub, check, is_sym, table) {
+                        eval_flat0(idx+1, slots, expr, tuples, check, result, table, stats, is_sym);
                     }
                 }
             }
@@ -400,20 +424,20 @@ fn eval_flat0(
                 AtomLookup::AllBound => {
                     let substituted: Tuple = sub_terms_compiled(slots, pat, table);
                     if !check.contains_tuple(&substituted) {
-                        eval_flat0(idx+1, slots, expr, tuples, check, result, table, stats);
+                        eval_flat0(idx+1, slots, expr, tuples, check, result, table, stats, is_sym);
                     }
                 }
                 _ => {
                     if !check.lookup(&pred).any(|stored_tuple| {
                         *stats.scan.entry(pred).or_insert(0) += 1;
-                        match_terms_compiled(slots, vs, stored_tuple, table)
+                        match_terms_compiled(slots, vs, stored_tuple, tuples, is_sym, table)
                     }) {
-                        eval_flat0(idx+1, slots, expr, tuples, check, result, table, stats);
+                        eval_flat0(idx+1, slots, expr, tuples, check, result, table, stats, is_sym);
                     }
                 }
             }
         }
-        Expr::Unit => eval_flat0(idx+1, slots, expr, tuples, check, result, table, stats),
+        Expr::Unit => eval_flat0(idx+1, slots, expr, tuples, check, result, table, stats, is_sym),
         Expr::Join(_, _) => panic!(""),
     }
 }
@@ -541,6 +565,7 @@ pub fn eval_spec_entry(
     result: &mut Vec<Vec<Tuple>>,
     table: &mut TermTable,
     stats: &mut EvalStats,
+    is_sym: Option<Sym>,
 ) {
     let slots = &mut entry.slots;
 
@@ -553,14 +578,14 @@ pub fn eval_spec_entry(
     let mut ok = true;
     let t_rest = &t[1..]; // skip pred
     for cpat in &entry.pats {
-        if !match_terms_compiled(slots, cpat, t_rest, table) {
+        if !match_terms_compiled(slots, cpat, t_rest, check, is_sym, table) {
             ok = false;
             break;
         }
     }
     if ok {
         // Eval remaining
-        for final_slots in eval_flat(slots, &entry.remaining.flatten(), ts, check, table, stats) {
+        for final_slots in eval_flat(slots, &entry.remaining.flatten(), ts, check, table, stats, is_sym) {
             // Substitute head
             let head_tuples: Vec<Tuple> = entry.head.iter().map(|ht| {
                 sub_terms_compiled(&final_slots, ht, table)
@@ -580,11 +605,12 @@ pub fn eval1_spec(
     _intern: &Interner,
     table: &mut TermTable,
     stats: &mut EvalStats,
+    is_sym: Option<Sym>,
 ) -> Vec<Vec<Tuple>> {
     let mut results = Vec::new();
 
     for entry in &mut spec.entries {
-        eval_spec_entry(entry, t, ts, check, &mut results, table, stats);
+        eval_spec_entry(entry, t, ts, check, &mut results, table, stats, is_sym);
     }
     results
 }
@@ -646,9 +672,10 @@ pub fn alt_iter(
                                                   // yields over-approx of solution
 
     // eprintln!("db1({}): {}", gen1, db1.pp_derp(intern));
-    if !gen1 { return db1 };
 
     // Second forward pass
+    // Note: we always do pass 2 even when gen1=false, because Choice resolution
+    // uses `check` (the stable previous fixpoint) and needs pass 2 to activate.
     let mut wl2: Worklist = ts0.iter().cloned().collect();
     let mut db2 = v.empty_clone();
     let gen2 = iter(f, &mut wl2, &mut db2, v, &db1); // anything outside db1 (over-approx) treated as false.
@@ -664,6 +691,7 @@ pub fn alt_iter(
 
 pub fn iter_rules(initial: HashSet<Tuple>, all_rules: Vec<Rule>, intern: &Interner, reorder: bool, index_specs: Vec<(Sym, usize)>) -> (Tuples, TermTable, EvalStats) {
     let (mut start, mut specs) = prespecialize(all_rules, intern, reorder);
+    let is_sym = intern.get("is");
 
     let table = Rc::new(RefCell::new(TermTable::new()));
     let stats = Rc::new(RefCell::new(EvalStats::new()));
@@ -675,7 +703,7 @@ pub fn iter_rules(initial: HashSet<Tuple>, all_rules: Vec<Rule>, intern: &Intern
         let mut st = stats.borrow_mut();
         for rule in &mut start {
             let mut ts = Vec::new();
-            eval_spec_entry(rule, &unit_tuple(), &Tuples::new(), &Tuples::new(), &mut ts, &mut tbl, &mut st);
+            eval_spec_entry(rule, &unit_tuple(), &Tuples::new(), &Tuples::new(), &mut ts, &mut tbl, &mut st, is_sym);
             for hts in ts {
                 for t in hts {
                     ts0.insert(t);
@@ -697,7 +725,7 @@ pub fn iter_rules(initial: HashSet<Tuple>, all_rules: Vec<Rule>, intern: &Intern
                 let mut st = stats_clone.borrow_mut();
                 let mut results = Vec::new();
                 for spec_rule in spec_rules {
-                    results.extend(eval1_spec(spec_rule, t, old, check, intern, &mut tbl, &mut st));
+                    results.extend(eval1_spec(spec_rule, t, old, check, intern, &mut tbl, &mut st, is_sym));
                 }
                 results
             }

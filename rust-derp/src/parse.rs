@@ -224,6 +224,16 @@ impl<'a> Parser<'a> {
     fn term(&mut self) -> PResult<ATerm> {
         // app <|> v <|> p <|> b <|> n <|> str
         // app = TermApp <$> predicate <*> parens (commaSep term)
+
+        // Try choice: ?t
+        let saved = self.pos;
+        if self.char_exact('?').is_ok() {
+            if let Ok(inner) = self.term() {
+                return Ok(achoice(inner));
+            }
+            self.pos = saved;
+        }
+
         // Try app first (predicate followed by parens), then fall back to pred
         let saved = self.pos;
 

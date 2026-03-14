@@ -17,6 +17,7 @@ pub fn astr(s: Name) -> ATerm { Rc::new(Term::Str(s)) }
 pub fn aapp(cons: Name, args: Vec<ATerm>) -> ATerm { Rc::new(Term::App(cons, args)) }
 pub fn aid(id: u32) -> ATerm { Rc::new(Term::Id(id)) }
 pub fn achoice(t: ATerm) -> ATerm { Rc::new(Term::Choice(t)) }
+pub fn abinop(op: BinOp, l: ATerm, r: ATerm) -> ATerm { Rc::new(Term::BinOp(op, l, r)) }
 pub fn aterm_ptr_eq(a: &ATerm, b: &ATerm) -> bool { Rc::ptr_eq(a, b) }
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Serialize)]
@@ -44,6 +45,9 @@ impl Name {
 }
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+pub enum BinOp { Plus, Minus, Times, Div }
+
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub enum VarOp {
     Name(Name),  // uncompiled variable
     Set(u16),    // first occurrence — write to slot unconditionally
@@ -60,6 +64,7 @@ pub enum Term {
     Str(Name),
     Id(u32),
     Choice(ATerm),
+    BinOp(BinOp, ATerm, ATerm),
 }
 
 impl Serialize for Term {
@@ -115,6 +120,18 @@ impl Serialize for Term {
                 map.serialize_entry("inner", t.as_ref())?;
                 map.end()
             }
+            Term::BinOp(op, l, r) => {
+                let op_str = match op {
+                    BinOp::Plus => "+", BinOp::Minus => "-",
+                    BinOp::Times => "*", BinOp::Div => "/",
+                };
+                let mut map = serializer.serialize_map(Some(4))?;
+                map.serialize_entry("tag", "binop")?;
+                map.serialize_entry("op", op_str)?;
+                map.serialize_entry("l", l.as_ref())?;
+                map.serialize_entry("r", r.as_ref())?;
+                map.end()
+            }
         }
     }
 }
@@ -135,6 +152,13 @@ impl Term {
             Term::Str(s) => format!("\"{}\"", s.resolve(i)),
             Term::Id(n) => format!("#{}", n),
             Term::Choice(t) => format!("?{}", t.pp(i)),
+            Term::BinOp(op, l, r) => {
+                let op_str = match op {
+                    BinOp::Plus => "+", BinOp::Minus => "-",
+                    BinOp::Times => "*", BinOp::Div => "/",
+                };
+                format!("{} {} {}", l.pp(i), op_str, r.pp(i))
+            }
         }
     }
 
@@ -151,6 +175,7 @@ impl Term {
             }
             Term::Str(s) => Term::Str(Name::Str(s.resolve(i).to_owned())),
             Term::Choice(t) => Term::Choice(Rc::new(t.resolve_names(i))),
+            Term::BinOp(op, l, r) => Term::BinOp(op.clone(), Rc::new(l.resolve_names(i)), Rc::new(r.resolve_names(i))),
         }
     }
 
@@ -174,6 +199,7 @@ impl Term {
             Term::Str(Name::Str(s)) => Term::Str(Name::Sym(i.intern(s))),
             Term::Str(Name::Sym(_)) => self.clone(),
             Term::Choice(t) => Term::Choice(Rc::new(t.intern_names(i))),
+            Term::BinOp(op, l, r) => Term::BinOp(op.clone(), Rc::new(l.intern_names(i)), Rc::new(r.intern_names(i))),
         }
     }
 
@@ -186,6 +212,7 @@ impl Term {
                 Term::App(cons.clone(), new_args)
             }
             Term::Choice(t) => Term::Choice(Rc::new(t.expand_ids(table))),
+            Term::BinOp(op, l, r) => Term::BinOp(op.clone(), Rc::new(l.expand_ids(table)), Rc::new(r.expand_ids(table))),
             other => other.clone(),
         }
     }
@@ -197,6 +224,7 @@ impl Term {
             Term::App(_, args) => args.iter().flat_map(|a| a.vars()).collect(),
             Term::Pred(_) | Term::Num(_) | Term::Blank | Term::Str(_) | Term::Id(_) => vec![],
             Term::Choice(t) => t.vars(),
+            Term::BinOp(_, l, r) => { let mut v = l.vars(); v.extend(r.vars()); v }
         }
     }
 }

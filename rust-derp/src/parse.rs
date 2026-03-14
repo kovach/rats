@@ -222,6 +222,26 @@ impl<'a> Parser<'a> {
     // -- Term parser ----------------------------------------------------------
 
     fn term(&mut self) -> PResult<ATerm> {
+        let lhs = self.term_primary()?;
+        let saved = self.pos;
+        self.ws();
+        let op = match self.peek() {
+            Some('+') => BinOp::Plus,
+            // Some('-') => BinOp::Minus,
+            Some('*') => BinOp::Times,
+            Some('/') => BinOp::Div,
+            _ => {
+                self.pos = saved;  // don't eat separator whitespace
+                return Ok(lhs);
+            }
+        };
+        self.advance(1);
+        self.ws();
+        let rhs = self.term_primary()?;
+        Ok(abinop(op, lhs, rhs))
+    }
+
+    fn term_primary(&mut self) -> PResult<ATerm> {
         // app <|> v <|> p <|> b <|> n <|> str
         // app = TermApp <$> predicate <*> parens (commaSep term)
 
@@ -293,6 +313,13 @@ impl<'a> Parser<'a> {
         if let Ok(s) = self.string_lit() {
             let sym = self.intern.intern(&s);
             return Ok(astr(Name::Sym(sym)));
+        }
+        self.pos = saved;
+
+        // Try parenthesized term: (term)
+        let saved = self.pos;
+        if let Ok(inner) = self.parens(|p| p.term()) {
+            return Ok(inner);
         }
         self.pos = saved;
 

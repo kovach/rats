@@ -187,6 +187,11 @@ fn compile_term(t: &ATerm, seen: &mut HashMap<Sym, u16>, next_slot: &mut u16) ->
             aapp(cons.clone(), cargs)
         }
         Term::Choice(inner) => achoice(compile_term(inner, seen, next_slot)),
+        Term::BinOp(op, l, r) => abinop(
+            op.clone(),
+            compile_term(l, seen, next_slot),
+            compile_term(r, seen, next_slot),
+        ),
         _ => t.clone(),  // Pred, Num, Blank, Str are unchanged
     }
 }
@@ -226,6 +231,7 @@ fn is_groundable(t: &ATerm) -> bool {
     match t.as_ref() {
         Term::Var(VarOp::Set(_)) | Term::Blank | Term::Choice(_) => false,
         Term::App(_, args) => args.iter().all(is_groundable),
+        Term::BinOp(_, l, r) => is_groundable(l) && is_groundable(r),
         _ => true,
     }
 }
@@ -300,6 +306,7 @@ fn match_term_compiled(slots: &mut Vec<ATerm>, pat: &ATerm, val: &ATerm, check: 
         }
         Term::Id(_) => panic!("match_term_compiled: Term::Id in pattern position"),
         Term::Choice(_) => unreachable!("Choice handled above"),
+        Term::BinOp(_, _, _) => panic!("match_term_compiled: BinOp in pattern position (should have been evaluated)"),
     }
 }
 
@@ -309,6 +316,18 @@ fn match_terms_compiled(slots: &mut Vec<ATerm>, pattern: &[ATerm], tuple: &[ATer
         if !match_term_compiled(slots, p, v, check, is_sym, table) { return false; }
     }
     true
+}
+
+fn eval_binop(op: &BinOp, l: &ATerm, r: &ATerm) -> ATerm {
+    match (l.as_ref(), r.as_ref()) {
+        (Term::Num(a), Term::Num(b)) => anum(match op {
+            BinOp::Plus  => a + b,
+            BinOp::Minus => a - b,
+            BinOp::Times => a * b,
+            BinOp::Div   => a / b,
+        }),
+        _ => panic!("eval_binop: operands did not evaluate to Num"),
+    }
 }
 
 fn sub_term_compiled(slots: &[ATerm], t: &ATerm, table: &mut TermTable) -> ATerm {
@@ -321,6 +340,11 @@ fn sub_term_compiled(slots: &[ATerm], t: &ATerm, table: &mut TermTable) -> ATerm
         }
         Term::Id(_) => t.clone(),  // already interned, pass through
         Term::Choice(inner) => achoice(sub_term_compiled(slots, inner, table)),
+        Term::BinOp(op, l, r) => {
+            let l2 = sub_term_compiled(slots, l, table);
+            let r2 = sub_term_compiled(slots, r, table);
+            eval_binop(op, &l2, &r2)
+        }
         _ => t.clone(),  // Pred, Num, Blank, Str are unchanged
     }
 }

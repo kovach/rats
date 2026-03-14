@@ -68,9 +68,9 @@ tuplesToProblem tuples = Problem intervals constraints True
   where
     ids = [arg | [D.TermPred "isId", arg] <- tuples]
     tags =
-      [ (i, ty)
+      [ (i, ty ++ if length r > 0 then "..." else "")
       | i <- ids
-      , (D.TermPred ty : a : _) <- tuples, a == i
+      , (D.TermPred ty : a : r) <- tuples, a == i
       , not (ty `elem` ["isId", "last", "moveBefore", "notLast", "move_at"])
       ]
     intervals =

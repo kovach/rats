@@ -9,6 +9,9 @@ r2:  ?action-phase / (
   !play-action ~> !it A
 ).
 
+?choose-action ~> !it foo.
+
+
 -- Playing an Action card has three steps:
 --   announcing it;
 --   moving it to the "in play" area - [...]; and
@@ -20,22 +23,22 @@ r3:  ?play-action ~> ?it A / (
   !activate      ~> !it A
 ).
 
+-- Throne Room
+-- (card text: You may play an action card from your hand twice.)
+?activate ~> ?it I ~> ?card/name I throne-room / (
+  !choose-action ~> ?it A;
+  !play-action   ~> !it A;
+  !play-action   ~> !it A
+).
+
 -- How to activate an action (two examples)
 exit
 
 -- Village
 -- (card text: +1 Card +2 Actions)
 ?activate ~> it I, card/name I village / (
-  #[1] / !gain-card,
-  #[2] / !gain-action
-).
-
--- Throne Room
--- (card text: You may play an action card from your hand twice.)
-?activate ~> it I, card/name I throne-room / (
-  !choose-action ~> ?it A;
-  !play-action ~> !it A;
-  !play-action ~> !it A;
+  #?[1] / !gain-card;
+  #?[2] / !gain-action
 ).
 
 exit

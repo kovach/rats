@@ -88,6 +88,7 @@ data E = Atom Pattern
        | At E E
        | Under E E
        | Instead Pattern E
+       | SameNot E Pattern
   deriving (Show, Eq, Ord)
 
 data Constraint
@@ -95,6 +96,7 @@ data Constraint
   | Cmp Op T T
   | Eq Term Term
   | Other [Term]
+  | Not [Constraint]
   -- TODO: remove these
   | IsId Term
   | Val Term Term
@@ -187,6 +189,7 @@ instance PP Constraint where
   pp (Val a b) = "Val " <> pp a <> " " <> pp b
   pp (IsId t) = "IsId " <> pp t
   pp (Try t) = "Try " <> pp t
+  pp (Not cs) = "!" <> args (map pp cs)
 instance PP Op where
   pp OpLt = "<"
   pp OpEq = "="
@@ -203,6 +206,7 @@ instance PP E where
   pp (At a b) = pwrap $ pp a <> " @ " <> pp b
   pp (SameIsh a b) = pwrap $ pp a <> " ~> " <> pp b
   pp (Instead a b) = pwrap $ pp a <> " -> " <> pp b
+  pp (SameNot a b) = pwrap $ pp a <> " ~¬ " <> pp b
 instance PP TRule where
   pp (TRule n e) = n <> ": " <> pp e <> "."
 
@@ -224,6 +228,7 @@ eTraverse f = go
     go (Same a b) = Same <$> (go a) <*> (go b)
     go (At a b) = At <$> (go a) <*> (go b)
     go (SameIsh a b) = SameIsh <$> (go a) <*> (go b)
+    go (SameNot a b) = SameNot <$> (go a) <*> pure b
 
 eMap :: (E -> E) -> E -> E
 eMap f = runIdentity . eTraverse (pure . f)
@@ -272,6 +277,7 @@ constraintVars (Cmp _ a b) = tVars a <> tVars b
 constraintVars (IsId t) = termVars t
 constraintVars (Eq a b) = termVars a <> termVars b
 constraintVars (Val a b) = termVars a <> termVars b
+constraintVars (Not cs) = concatMap constraintVars cs
 constraintVars (Try _) = error "todo"
 constraintsVars :: [Constraint] -> [Var]
 constraintsVars = concatMap constraintVars

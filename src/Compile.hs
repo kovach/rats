@@ -53,17 +53,17 @@ freshAtomVar p | Just (Pred pr) <- predPattern p = fresh $ capitalize pr
 freshAtomVar _ = fresh "_id"
 
 -- todo: freeVars only
-vars :: E -> [Var]
-vars = nub . execWriter . eTraverse' go
-  where
-    go (Atom p) = tell (patternVars p)
-    go (EVar t) = tell (termVars t)
-    go _ = pure ()
-
-freeVars :: E -> [Var]
-freeVars = filter isFreeVar . vars
-posVars :: E -> [Var]
-posVars = filter isPosVar . vars
+-- vars :: E -> [Var]
+-- vars = nub . execWriter . eTraverse' go
+--   where
+--     go (Atom p) = tell (patternVars p)
+--     go (EVar t) = tell (termVars t)
+--     go _ = pure ()
+--
+-- freeVars :: E -> [Var]
+-- freeVars = filter isFreeVar . vars
+-- posVars :: E -> [Var]
+-- posVars = filter isPosVar . vars
 
 patternBoundVars :: E -> [Var]
 patternBoundVars = filter isFreeVar . nub . execWriter . eTraverse' go
@@ -130,6 +130,12 @@ elabPosAtoms ruleName e = eTraverse go e
 --    go (TermFreshVar v) = pure $ TermId $ Id (ruleName <> ":" <> pp v) vs
 --    go e' = pure e'
 
+exceptionPredicates :: E -> [(Pred, E)]
+exceptionPredicates = nub . execWriter . eTraverse' go
+  where
+    go (Instead (PP l _) r) = tell [(l,r)]
+    go _ = pure ()
+
 elab' (TRule r e) = do
   -- mark existential variables,
   -- fresh names on choice vars,
@@ -169,6 +175,12 @@ check (Atom p@(Pattern sign (AllVars v _name) ts)) = do
     AtomNeg  -> tell [Constraint p]
   pure (I (leftEnd v) (rightEnd v))
 check (Atom p) = error $ pp p
+check (SameNot a p@(Pattern _ (AllVars v _) _)) = do
+  I al ar <- check a
+  let (bl, br) = (leftEnd v, rightEnd v)
+  tell [Not [Constraint p, al `Eql` bl, br `Eql` ar]]
+  pure $ I al ar
+check e@(SameNot {}) = error $ pp e
 check (EVar t) = do
   tell [L t `Lt` R t]
   pure $ I (L t) (R t)
@@ -262,8 +274,8 @@ quantElimConstraints' evs pvs ps = out
     c = all ok out'
     ok (Cmp _ a b) = not (a `elem` evs || b `elem` evs)
     ok _ = True
-    (cmps, rest) = partition isCmp ps
-    elimEx = elimVars evs cmps
+    (cmps1, rest) = partition isCmp ps
+    elimEx = elimVars evs cmps1
     elimAll = elimVars pvs elimEx
     isGt v (Cmp OpLt _ v') = v == v'
     isGt _ _ = False
@@ -312,21 +324,22 @@ isPos vs (Cmp _ a b) = any (tContainsId vs) [a,b]
 isPos vs (IsId t) = termContainsId vs t
 isPos _vs (Try _) = True
 isPos vs (Other ts) = any (termContainsId vs) ts
+isPos _vs (Not _) = False
 
-genMagicLt :: Rule -> Rule
-genMagicLt (Rule negSet _) = result
-  where
-    neg = Set.toList negSet
-    cmps = map termOfEndpoint $ mapMaybe (\case Cmp OpLt a _ -> Just a; _ -> Nothing) neg
-    termOfEndpoint (L x) = x
-    termOfEndpoint (R x) = x
-    termOfEndpoint _ = error ""
-    toMSPred term =
-      Other [TermPred "wantLt", term]
-    magicRule = Rule (Set.filter (not . isCmp) negSet) (Set.fromList $ map toMSPred cmps)
-    isCmp (Cmp {}) = True
-    isCmp _ = False
-    result = magicRule
+-- genMagicLt :: Rule -> Rule
+-- genMagicLt (Rule negSet _) = result
+--   where
+--     neg = Set.toList negSet
+--     cmps = map termOfEndpoint $ mapMaybe (\case Cmp OpLt a _ -> Just a; _ -> Nothing) neg
+--     termOfEndpoint (L x) = x
+--     termOfEndpoint (R x) = x
+--     termOfEndpoint _ = error ""
+--     toMSPred term =
+--       Other [TermPred "wantLt", term]
+--     magicRule = Rule (Set.filter (not . isCmp) negSet) (Set.fromList $ map toMSPred cmps)
+--     isCmp (Cmp {}) = True
+--     isCmp _ = False
+--     result = magicRule
 
 -- Use pvs as the set of positive variables
 -- splitConstraints :: [Var] -> [Constraint] -> Rule
@@ -405,7 +418,7 @@ addScopes n = concatMap fix
               , IsId (TermVar v) ]
 
 groupScope :: VarScope -> [Constraint] -> Rule
-groupScope (VS heads deps) = splitConstraints heads . map fix . sub . quantElimConstraintsGroup allVars
+groupScope (VS heads deps) = splitConstraints heads . expandConstraints . map fix . sub . quantElimConstraintsGroup allVars
   where
     allVars = heads <> deps
     sub = filter (\c -> constraintVars c `subset` allVars)
@@ -417,7 +430,7 @@ groupScope (VS heads deps) = splitConstraints heads . map fix . sub . quantElimC
 groupScopes :: [VarScope] -> [Constraint] -> [Rule]
 groupScopes vs cs = map (\v -> groupScope v cs) vs
 
--- fixScopes :: [Constraint] -> [Rule]
+fixScopes :: Name -> [Constraint] -> [Rule]
 fixScopes n c = groupScopes deps $ addScopes n deps <> c <> newLts -- TODO: breaks ~
   where
     deps = depVarSets c
@@ -443,23 +456,17 @@ generateConstraints (TRule n e) = trace (unlines $ map pp sets) c'
 
     sets = depVarSets c
 
-ppt f cs = trace ("!!: " <> unlines (map pp cs)) $ f cs
-generateConstraints' e = splitConstraints (posVars e)
-  . (ppt expandConstraints)
-  . (ppt $ quantElimConstraints)
-  . expandConstraints
-  . checkAll $ e
-
-exceptionPredicates :: E -> [(Pred, E)]
-exceptionPredicates = nub . execWriter . eTraverse' go
-  where
-    go (Instead (PP l _) r) = tell [(l,r)]
-    go _ = pure ()
+-- ppt f cs = trace ("!!: " <> unlines (map pp cs)) $ f cs
+-- generateConstraints' e = splitConstraints (posVars e)
+--   . (ppt expandConstraints)
+--   . (ppt $ quantElimConstraints)
+--   . expandConstraints
+--   . checkAll $ e
 
 rewritePredicate from to = eMap fix
   where
     fix (Atom (PPP p a b c)) | from == p = Atom $ PPP to a b c
-    go x = x
+    fix x = x
 
 -- note: exception condition cannot depend on
 rewriteOneException name' p = eMap fix
@@ -503,10 +510,10 @@ handleExceptions trs = result
 
 -- Remove `L a < R a` checks from rule bodies.
 simplRule :: Rule -> Rule
-simplRule (Rule {body, head}) = Rule {body = body', head = head'}
+simplRule (Rule {body, head = h}) = Rule {body = body', head = head'}
   where
     body' = Set.filter ok body
-    head' = head
+    head' = h
     ok (Cmp OpLt (L a) (R b)) | a == b = False
     ok _ = True
 
@@ -557,25 +564,25 @@ mkFile path p = do
   prelude <- GD.readPrelude
   writeFile path $ prelude <> p
 
-demo name rules = do
-    case find (byName) rules of
-      Just (RuleStatement _ r) -> do
-        let f = TRule name r
-        --let f = (name, fromJust $ lookup name rules)
-        pprint $ r
-        putStrLn "~~~~~~~~~"
-        let f' = elab f
-        pprint f'
-        putStrLn "~~~~~~~~~"
-        let Rule body h = generateConstraints' $ trE f' -- todo
-        mapM_ pprint body
-        putStrLn "---------"
-        mapM_ pprint h
-        putStrLn "~~~~~~~~~"
-      _ -> error ""
-  where
-    byName (RuleStatement (Just n) _) | n == name = True
-    byName _ = False
+-- demo name rules = do
+--     case find (byName) rules of
+--       Just (RuleStatement _ r) -> do
+--         let f = TRule name r
+--         --let f = (name, fromJust $ lookup name rules)
+--         pprint $ r
+--         putStrLn "~~~~~~~~~"
+--         let f' = elab f
+--         pprint f'
+--         putStrLn "~~~~~~~~~"
+--         let Rule body h = generateConstraints' $ trE f' -- todo
+--         mapM_ pprint body
+--         putStrLn "---------"
+--         mapM_ pprint h
+--         putStrLn "~~~~~~~~~"
+--       _ -> error ""
+--   where
+--     byName (RuleStatement (Just n) _) | n == name = True
+--     byName _ = False
 
 genDerp base = do
   pr0 <- readFile (base ++ ".turn")

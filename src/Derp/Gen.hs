@@ -41,6 +41,7 @@ constraintCompile = \case
   Val a b -> spaces ["val", termCompile a, termCompile b]
   Try (PPI p _ i ts) -> spaces [tryPred, cons (pp p) (pp i : termsCompile ts)]
   Try p -> error $ show p
+  Not cs -> "!" <> args (map constraintCompile cs)
 opString OpLt = "lt"
 opString OpEq = "eq"
 varCompile = \case

@@ -2,10 +2,160 @@ use crate::sym::Interner;
 use crate::types::*;
 use crate::core::{atom};
 
+// -- Tokenizer ----------------------------------------------------------------
+
+#[derive(Debug, Clone, PartialEq)]
+enum Token {
+    Ident(String),  // predicate or variable name (may contain - / _ ' internally)
+    Blank,          // standalone _
+    Nat(i32),
+    Str(String),
+    // punctuation
+    LParen,         // ( with whitespace before it (or at start)
+    LParenAdj,      // ( immediately following an identifier — marks function application
+    RParen,
+    Comma,
+    Dot,
+    Eq,
+    Bang,
+    Question,
+    // operators (only when appearing at token-start position, not mid-ident)
+    Plus,
+    Minus,
+    Star,
+    Slash,
+    // two or more consecutive hyphens at token-start position
+    RuleSep,
+}
+
+fn is_id_char(c: char) -> bool {
+    c.is_alphanumeric() || c == '-' || c == '/' || c == '_' || c == '\''
+}
+
+fn lex(input: &str) -> Result<Vec<Token>, String> {
+    let chars: Vec<char> = input.chars().collect();
+    let mut pos = 0;
+    let mut tokens = Vec::new();
+    // True when the last emitted token was an Ident — used to distinguish
+    // adjacent `f(` (application) from spaced `f (` (predicate + parens).
+    let mut after_ident = false;
+
+    while pos < chars.len() {
+        let c = chars[pos];
+
+        // Skip whitespace; clears the adjacency flag
+        if c == ' ' || c == '\n' || c == '\t' || c == '\r' {
+            after_ident = false;
+            pos += 1;
+            continue;
+        }
+
+        // Hyphens: two or more → RuleSep; single → Minus
+        if c == '-' {
+            after_ident = false;
+            if pos + 1 < chars.len() && chars[pos + 1] == '-' {
+                while pos < chars.len() && chars[pos] == '-' {
+                    pos += 1;
+                }
+                tokens.push(Token::RuleSep);
+            } else {
+                pos += 1;
+                tokens.push(Token::Minus);
+            }
+            continue;
+        }
+
+        // Identifiers: start with letter or #, consume id chars greedily
+        if c.is_alphabetic() || c == '#' {
+            let start = pos;
+            pos += 1;
+            while pos < chars.len() && is_id_char(chars[pos]) {
+                pos += 1;
+            }
+            let s: String = chars[start..pos].iter().collect();
+            tokens.push(Token::Ident(s));
+            after_ident = true;
+            continue;
+        }
+
+        // _ alone becomes Blank; _var becomes Ident("_var")
+        if c == '_' {
+            pos += 1;
+            if pos < chars.len() && is_id_char(chars[pos]) {
+                let start = pos - 1;
+                while pos < chars.len() && is_id_char(chars[pos]) {
+                    pos += 1;
+                }
+                let s: String = chars[start..pos].iter().collect();
+                tokens.push(Token::Ident(s));
+                after_ident = true;
+            } else {
+                tokens.push(Token::Blank);
+                after_ident = false;
+            }
+            continue;
+        }
+
+        // Digits
+        if c.is_ascii_digit() {
+            after_ident = false;
+            let start = pos;
+            while pos < chars.len() && chars[pos].is_ascii_digit() {
+                pos += 1;
+            }
+            let s: String = chars[start..pos].iter().collect();
+            let n = s.parse::<i32>().map_err(|e| e.to_string())?;
+            tokens.push(Token::Nat(n));
+            continue;
+        }
+
+        // String literal
+        if c == '"' {
+            after_ident = false;
+            pos += 1;
+            let mut s = String::new();
+            loop {
+                if pos >= chars.len() {
+                    return Err("unterminated string literal".to_string());
+                }
+                if chars[pos] == '"' {
+                    pos += 1;
+                    break;
+                }
+                s.push(chars[pos]);
+                pos += 1;
+            }
+            tokens.push(Token::Str(s));
+            continue;
+        }
+
+        // Single-character tokens
+        let tok = match c {
+            // ( immediately following an ident marks function application
+            '(' => if after_ident { Token::LParenAdj } else { Token::LParen },
+            ')' => Token::RParen,
+            ',' => Token::Comma,
+            '.' => Token::Dot,
+            '=' => Token::Eq,
+            '!' => Token::Bang,
+            '?' => Token::Question,
+            '+' => Token::Plus,
+            '*' => Token::Star,
+            '/' => Token::Slash,
+            other => return Err(format!("unexpected character '{}' at byte pos {}", other, pos)),
+        };
+        after_ident = false;
+        pos += 1;
+        tokens.push(tok);
+    }
+
+    Ok(tokens)
+}
+
 // -- Parser state -------------------------------------------------------------
 
 struct Parser<'a> {
-    input: &'a str,
+    tokens: Vec<Token>,
     pos: usize,
     intern: &'a mut Interner,
 }
@@ -13,164 +163,88 @@ struct Parser<'a> {
 type PResult<T> = Result<T, String>;
 
 impl<'a> Parser<'a> {
-    fn new(input: &'a str, intern: &'a mut Interner) -> Self {
-        Parser { input, pos: 0, intern }
+    fn new(tokens: Vec<Token>, intern: &'a mut Interner) -> Self {
+        Parser { tokens, pos: 0, intern }
     }
 
-    fn remaining(&self) -> &str {
-        &self.input[self.pos..]
+    fn peek(&self) -> Option<&Token> {
+        self.tokens.get(self.pos)
     }
 
-    fn peek(&self) -> Option<char> {
-        self.remaining().chars().next()
+    fn advance(&mut self) {
+        self.pos += 1;
     }
 
-    fn advance(&mut self, n: usize) {
-        self.pos += n;
-    }
-
-    fn char_match(&mut self, f: impl Fn(char) -> bool, desc: &str) -> PResult<char> {
+    fn expect(&mut self, tok: &Token) -> PResult<()> {
         match self.peek() {
-            Some(c) if f(c) => {
-                self.advance(c.len_utf8());
-                Ok(c)
+            Some(t) if t == tok => {
+                self.advance();
+                Ok(())
             }
-            _ => Err(format!("[expected: '{}'] at pos {}", desc, self.pos)),
+            other => Err(format!("expected {:?}, got {:?} at token pos {}", tok, other, self.pos)),
         }
-    }
-
-    fn char_exact(&mut self, c: char) -> PResult<char> {
-        self.char_match(|ch| ch == c, &c.to_string())
-    }
-
-    fn string_exact(&mut self, s: &str) -> PResult<()> {
-        if self.remaining().starts_with(s) {
-            self.advance(s.len());
-            Ok(())
-        } else {
-            Err(format!("expected '{}' at pos {}", s, self.pos))
-        }
-    }
-
-    fn ws(&mut self) {
-        while let Some(c) = self.peek() {
-            if c == ' ' || c == '\n' || c == '\t' {
-                self.advance(c.len_utf8());
-            } else {
-                break;
-            }
-        }
-    }
-
-    fn ws1(&mut self) -> PResult<()> {
-        let start = self.pos;
-        self.ws();
-        if self.pos == start {
-            Err(format!("expected whitespace at pos {}", self.pos))
-        } else {
-            Ok(())
-        }
-    }
-
-    fn is_id_special_char(c: char) -> bool {
-        c == '-' || c == '/' || c == '_' || c == '\''
-    }
-
-    fn is_id_char(c: char) -> bool {
-        c.is_alphanumeric() || Self::is_id_special_char(c)
     }
 
     fn predicate(&mut self) -> PResult<String> {
-        let first = self.char_match(|c| c.is_lowercase() || c == '#', "lowercase or #")?;
-        let mut s = String::new();
-        s.push(first);
-        while let Some(c) = self.peek() {
-            if Self::is_id_char(c) {
-                s.push(c);
-                self.advance(c.len_utf8());
-            } else {
-                break;
+        match self.peek() {
+            Some(Token::Ident(s)) if s.starts_with(|c: char| c.is_lowercase() || c == '#') => {
+                let s = s.clone();
+                self.advance();
+                Ok(s)
             }
+            other => Err(format!("expected predicate, got {:?} at token pos {}", other, self.pos)),
         }
-        Ok(s)
     }
 
     fn variable(&mut self) -> PResult<String> {
-        let first = self.peek().ok_or("expected variable".to_string())?;
-        if first.is_uppercase() {
-            self.advance(first.len_utf8());
-            let mut s = String::new();
-            s.push(first);
-            while let Some(c) = self.peek() {
-                if Self::is_id_char(c) {
-                    s.push(c);
-                    self.advance(c.len_utf8());
-                } else {
-                    break;
-                }
+        match self.peek() {
+            Some(Token::Ident(s))
+                if s.starts_with(|c: char| c.is_uppercase())
+                    || (s.starts_with('_') && s.len() > 1) =>
+            {
+                let s = s.clone();
+                self.advance();
+                Ok(s)
             }
-            Ok(s)
-        } else if first == '_' {
-            self.advance(first.len_utf8());
-            let mut s = String::from("_");
-            // _var requires at least one more char (many1 idChar)
-            let c = self.char_match(Self::is_id_char, "id char after _")?;
-            s.push(c);
-            while let Some(c) = self.peek() {
-                if Self::is_id_char(c) {
-                    s.push(c);
-                    self.advance(c.len_utf8());
-                } else {
-                    break;
-                }
-            }
-            Ok(s)
-        } else {
-            Err(format!("expected variable at pos {}", self.pos))
+            other => Err(format!("expected variable, got {:?} at token pos {}", other, self.pos)),
         }
     }
 
     fn nat(&mut self) -> PResult<i32> {
-        let mut s = String::new();
-        while let Some(c) = self.peek() {
-            if c.is_ascii_digit() {
-                s.push(c);
-                self.advance(c.len_utf8());
-            } else {
-                break;
+        match self.peek() {
+            Some(Token::Nat(n)) => {
+                let n = *n;
+                self.advance();
+                Ok(n)
             }
-        }
-        if s.is_empty() {
-            Err(format!("expected number at pos {}", self.pos))
-        } else {
-            s.parse::<i32>().map_err(|e| e.to_string())
+            other => Err(format!("expected number, got {:?} at token pos {}", other, self.pos)),
         }
     }
 
     fn string_lit(&mut self) -> PResult<String> {
-        self.char_exact('"')?;
-        let mut s = String::new();
-        loop {
-            match self.peek() {
-                Some('"') => {
-                    self.advance(1);
-                    return Ok(s);
-                }
-                Some(c) => {
-                    s.push(c);
-                    self.advance(c.len_utf8());
-                }
-                None => return Err("unterminated string".to_string()),
+        match self.peek() {
+            Some(Token::Str(s)) => {
+                let s = s.clone();
+                self.advance();
+                Ok(s)
             }
+            other => Err(format!("expected string, got {:?} at token pos {}", other, self.pos)),
         }
     }
 
     fn parens<T>(&mut self, f: impl FnOnce(&mut Self) -> PResult<T>) -> PResult<T> {
-        self.char_exact('(')?;
-        self.ws();
+        self.expect(&Token::LParen)?;
         let v = f(self)?;
-        self.ws();
-        self.char_exact(')')?;
+        self.expect(&Token::RParen)?;
+        Ok(v)
+    }
+
+    /// Like parens but requires LParenAdj — used for function application `f(args)`
+    /// to distinguish it from a predicate followed by a parenthesized term `f (expr)`.
+    fn adj_parens<T>(&mut self, f: impl FnOnce(&mut Self) -> PResult<T>) -> PResult<T> {
+        self.expect(&Token::LParenAdj)?;
+        let v = f(self)?;
+        self.expect(&Token::RParen)?;
         Ok(v)
     }
 
@@ -182,10 +256,9 @@ impl<'a> Parser<'a> {
         }
         loop {
             let saved = self.pos;
-            if self.char_exact(',').is_err() {
+            if self.expect(&Token::Comma).is_err() {
                 break;
             }
-            self.ws();
             match f(self) {
                 Ok(v) => results.push(v),
                 Err(_) => {
@@ -197,17 +270,12 @@ impl<'a> Parser<'a> {
         Ok(results)
     }
 
-    fn ws_sep<T>(&mut self, f: impl Fn(&mut Self) -> PResult<T>) -> PResult<Vec<T>> {
+    /// Parse zero or more occurrences of f, stopping on the first failure.
+    /// Replaces ws_sep: whitespace separation is handled by the tokenizer.
+    fn many<T>(&mut self, f: impl Fn(&mut Self) -> PResult<T>) -> PResult<Vec<T>> {
         let mut results = Vec::new();
-        match f(self) {
-            Ok(v) => results.push(v),
-            Err(_) => return Ok(results),
-        }
         loop {
             let saved = self.pos;
-            if self.ws1().is_err() {
-                break;
-            }
             match f(self) {
                 Ok(v) => results.push(v),
                 Err(_) => {
@@ -224,51 +292,42 @@ impl<'a> Parser<'a> {
     fn term(&mut self) -> PResult<ATerm> {
         let lhs = self.term_primary()?;
         let saved = self.pos;
-        self.ws();
         let op = match self.peek() {
-            Some('+') => BinOp::Plus,
-            // Some('-') => BinOp::Minus,
-            Some('*') => BinOp::Times,
-            Some('/') => BinOp::Div,
+            Some(Token::Plus)  => BinOp::Plus,
+            Some(Token::Minus) => BinOp::Minus,
+            Some(Token::Star)  => BinOp::Times,
+            Some(Token::Slash) => BinOp::Div,
             _ => {
-                self.pos = saved;  // don't eat separator whitespace
+                self.pos = saved;
                 return Ok(lhs);
             }
         };
-        self.advance(1);
-        self.ws();
+        self.advance();
         let rhs = self.term_primary()?;
         Ok(abinop(op, lhs, rhs))
     }
 
     fn term_primary(&mut self) -> PResult<ATerm> {
-        // app <|> v <|> p <|> b <|> n <|> str
-        // app = TermApp <$> predicate <*> parens (commaSep term)
-
         // Try choice: ?t
         let saved = self.pos;
-        if self.char_exact('?').is_ok() {
+        if self.expect(&Token::Question).is_ok() {
             if let Ok(inner) = self.term() {
                 return Ok(achoice(inner));
             }
             self.pos = saved;
         }
 
-        // Try app first (predicate followed by parens), then fall back to pred
+        // Try app: predicate immediately followed by parens `f(args)`, or plain predicate
         let saved = self.pos;
-
-        // Try app: predicate + parens
         if let Ok(name) = self.predicate() {
             let saved2 = self.pos;
-            if let Ok(args) = self.parens(|p| p.comma_sep(|p| p.term())) {
+            if let Ok(args) = self.adj_parens(|p| p.comma_sep(|p| p.term())) {
                 let sym = self.intern.intern(&name);
                 return Ok(aapp(Name::Sym(sym), args));
             }
-            // It was just a predicate, not an app
             self.pos = saved2;
             if name.starts_with('#') {
                 return Ok(apred(Name::Str(name)));
-                // return Ok(apred(Name::Str(String::from(&name[1..]))));
             } else {
                 let sym = self.intern.intern(&name);
                 return Ok(apred(Name::Sym(sym)));
@@ -284,21 +343,10 @@ impl<'a> Parser<'a> {
         }
         self.pos = saved;
 
-        // Try blank (just '_' with no following id chars)
-        if let Some('_') = self.peek() {
-            // Check it's not a _var (which would be a variable)
-            let saved = self.pos;
-            self.advance(1);
-            match self.peek() {
-                Some(c) if Self::is_id_char(c) => {
-                    // It's a _var, backtrack and parse as variable
-                    self.pos = saved;
-                    let v = self.variable()?;
-                    let sym = self.intern.intern(&v);
-                    return Ok(avar(Name::Sym(sym)));
-                }
-                _ => return Ok(ablank()),
-            }
+        // Try blank
+        if matches!(self.peek(), Some(Token::Blank)) {
+            self.advance();
+            return Ok(ablank());
         }
 
         // Try number
@@ -316,65 +364,58 @@ impl<'a> Parser<'a> {
         }
         self.pos = saved;
 
-        // Try parenthesized term: (term)
+        // Try parenthesized term
         let saved = self.pos;
         if let Ok(inner) = self.parens(|p| p.term()) {
             return Ok(inner);
         }
         self.pos = saved;
 
-        Err(format!("expected term at pos {}", self.pos))
+        Err(format!("expected term at token pos {}", self.pos))
     }
 
     // -- Tuple parser ---------------------------------------------------------
 
     fn tuple(&mut self) -> PResult<Tuple> {
-        let terms = self.ws_sep(|p| p.term())?;
+        let terms = self.many(|p| p.term())?;
         Ok(terms.into_iter().collect())
     }
 
     // -- Expr parser ----------------------------------------------------------
 
     fn expr(&mut self) -> PResult<Expr> {
-        // simplify <$> joins' <$> commaSep leaf
         let leaves = self.comma_sep(|p| p.expr_leaf())?;
         let e = leaves.into_iter().fold(Expr::Unit, |acc, leaf| join(acc, leaf));
         Ok(e)
     }
 
     fn expr_leaf(&mut self) -> PResult<Expr> {
-        // neg <|> bind <|> tup
         let saved = self.pos;
 
         // Try neg: '!' followed by terms
-        if self.char_exact('!').is_ok() {
-            let terms = self.ws_sep(|p| p.term())?;
+        if self.expect(&Token::Bang).is_ok() {
+            let terms = self.many(|p| p.term())?;
             let tuple: Tuple = terms.into_iter().collect();
             return Ok(Expr::NegAtom(tuple));
         }
         self.pos = saved;
 
         // Try bind: term '=' term
-        // Need to try this carefully - the '=' must be there
         let saved = self.pos;
         if let Ok(lhs) = self.term() {
             let saved2 = self.pos;
-            self.ws();
-            if self.char_exact('=').is_ok() {
-                self.ws();
+            if self.expect(&Token::Eq).is_ok() {
                 let rhs = self.term()?;
                 return Ok(Expr::Bind(lhs, rhs));
             }
             self.pos = saved2;
-
-            // It was a tup start — put lhs back and parse as tup
             self.pos = saved;
         } else {
             self.pos = saved;
         }
 
-        // Try tup: ws_sep term → atom
-        let terms = self.ws_sep(|p| p.term())?;
+        // Try tup: many terms → atom
+        let terms = self.many(|p| p.term())?;
         let tuple: Tuple = terms.into_iter().collect();
         Ok(atom(tuple))
     }
@@ -383,11 +424,7 @@ impl<'a> Parser<'a> {
 
     fn rule(&mut self) -> PResult<Rule> {
         let body = self.expr()?;
-        self.ws();
-        // "--" followed by optional '-'s
-        self.string_exact("--")?;
-        while self.char_exact('-').is_ok() {}
-        self.ws();
+        self.expect(&Token::RuleSep)?;
         let heads = self.comma_sep(|p| p.tuple())?;
         Ok(Rule {
             body: Closure { ctx: Binding::new(), val: body },
@@ -400,13 +437,11 @@ impl<'a> Parser<'a> {
     fn prog(&mut self) -> PResult<Vec<Rule>> {
         let mut rules = Vec::new();
         loop {
-            self.ws();
-            if self.pos >= self.input.len() {
+            if self.pos >= self.tokens.len() {
                 break;
             }
             let rule = self.rule()?;
-            self.ws();
-            self.char_exact('.')?;
+            self.expect(&Token::Dot)?;
             rules.push(rule);
         }
         Ok(rules)
@@ -415,7 +450,7 @@ impl<'a> Parser<'a> {
 
 // -- Public API ---------------------------------------------------------------
 
-/// Strip comments (lines starting with ';' from comment position onward)
+/// Strip comments (text from ';' to end of line)
 fn lex_comments(input: &str) -> String {
     input
         .lines()
@@ -432,6 +467,7 @@ fn lex_comments(input: &str) -> String {
 
 pub fn parse(input: &str, intern: &mut Interner) -> Result<Vec<Rule>, String> {
     let cleaned = lex_comments(input);
-    let mut parser = Parser::new(&cleaned, intern);
+    let tokens = lex(&cleaned)?;
+    let mut parser = Parser::new(tokens, intern);
     parser.prog()
 }

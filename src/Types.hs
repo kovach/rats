@@ -34,6 +34,7 @@ data Pred = Pred String
 data T = L Term | R Term | Min T T | Max T T | Top | Bot
   deriving (Show, Eq, Ord)
 data I = I T T deriving (Show, Eq, Ord)
+data BinOp = BinAdd | BinSub deriving (Show, Eq, Ord)
 data Term = TermPred Pred
           | TermNum Int
           | TermId Id
@@ -43,6 +44,7 @@ data Term = TermPred Pred
           | TermBlank
           | TermExt String
           | TermApp Name [Term]
+          | TermBin BinOp Term Term
   deriving (Show, Eq, Ord)
 
 data Op = OpLt
@@ -56,6 +58,11 @@ data AtomType
   | AtomPos
   | AtomAsk
   | AtomNeg
+  deriving (Show, Eq, Ord)
+
+data PredToken = PredToken AtomType Pred
+  deriving (Show, Eq, Ord)
+data Token = PT PredToken | PTerm Term
   deriving (Show, Eq, Ord)
 
 data PVar
@@ -77,6 +84,7 @@ pattern PPI p s i ts <- Pattern s (PVar (Just i) _) (TermPred p : ts)
 pattern PPP p a b ts = Pattern a b (TermPred p : ts)
 
 data E = Atom Pattern
+       | Shelf [Token]
        | EVar Term
        | After E
        | And E E
@@ -157,6 +165,9 @@ instance PP Var where
     FreeVar v -> v
     PosVar v -> v
     ExVar v -> "-" <> v
+instance PP BinOp where
+  pp BinAdd = "+"
+  pp BinSub = "-"
 instance PP Term where
   pp (TermVar v) = pp v
   pp (TermPred p) = pp p
@@ -167,6 +178,7 @@ instance PP Term where
   pp (TermExt s) = s
   pp TermBlank = "_"
   pp (TermApp c ts) = c <> args (map pp ts)
+  pp (TermBin op a b) = pwrap $ pp a <> pp op <> pp b
 instance PP AtomType where
   pp AtomFree = "?"
   pp AtomPos = "!"
@@ -193,6 +205,11 @@ instance PP Constraint where
 instance PP Op where
   pp OpLt = "<"
   pp OpEq = "="
+instance PP PredToken where
+  pp (PredToken s x) = pp s <> pp x
+instance PP Token where
+  pp (PT x) = pp x
+  pp (PTerm x) = pp x
 instance PP E where
   pp (Atom p) = pp p
   pp (After e) = "#" <> pp e
@@ -207,6 +224,7 @@ instance PP E where
   pp (SameIsh a b) = pwrap $ pp a <> " ~> " <> pp b
   pp (Instead a b) = pwrap $ pp a <> " -> " <> pp b
   pp (SameNot a b) = pwrap $ pp a <> " ~¬ " <> pp b
+  pp (Shelf ts) = pwrap $ unwords $ map pp ts
 instance PP TRule where
   pp (TRule n e) = n <> ": " <> pp e <> "."
 
@@ -219,6 +237,7 @@ eTraverse f = go
     go e@(Atom _) = f e
     go e@(EVar _) = f e
     go e@(Instead _ _) = f e -- TODO
+    go e@(Shelf _) = f e
     go (After e) = (After <$> go e)
     go (And a b) = And <$> (go a) <*> (go b)
     go (Seq a b) = Seq <$> (go a) <*> (go b)
@@ -265,6 +284,7 @@ termsVars = concatMap termVars
 termVars (TermVar v) = [v]
 termVars (TermChoiceVar _ v) = [v]
 termVars (TermApp _ ts) = termsVars ts
+termVars (TermBin _ a b) = termsVars [a,b]
 termVars (TermFreshVar _) = [] -- these elaborate directly into an id constructor
 termVars (TermId (Id _ vs)) = vs -- should be redundant
 termVars (TermPred {}) = []

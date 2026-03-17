@@ -136,6 +136,12 @@ exceptionPredicates = nub . execWriter . eTraverse' go
     go (Instead (PP l _) r) = tell [(l,r)]
     go _ = pure ()
 
+tokenParse :: E -> E
+tokenParse = eMap go
+  where
+    go (Shelf ts) = error "todo"
+    go x = x
+
 elab' (TRule r e) = do
   -- mark existential variables,
   -- fresh names on choice vars,

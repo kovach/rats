@@ -38,7 +38,7 @@
 function renderTerm(t) {
   switch (t.tag) {
     case 'app':
-      if (t.name === 'id') return 'id(...)';
+      //if (t.name === 'id') return 'id(...)';
       return t.name + '(' + t.args.map(renderTerm).join(', ') + ')';
     case 'var':  return t.name;
     case 'pred': return t.name;

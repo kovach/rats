@@ -24,6 +24,7 @@ import Data.Aeson (encode)
 import qualified Data.ByteString.Lazy.Char8 as BLC
 
 import Compile (main1)
+import Basic
 import qualified Derp.Parse as DP
 import qualified Derp.Core as D
 import DrawDiagram.Layout (Problem(..), I(..), Constraint(..), T(..), IntervalDiagram(..))
@@ -68,10 +69,10 @@ tuplesToProblem tuples = Problem intervals constraints True
   where
     ids = [arg | [D.TermPred "isId", arg] <- tuples]
     tags =
-      [ (i, ty ++ if length r > 0 then "..." else "")
+      [ (i, ty ++ if length r > 0 then " " <> (unwords $ map pp r) else "")
       | i <- ids
       , (D.TermPred ty : a : r) <- tuples, a == i
-      , not (ty `elem` ["isId", "last", "moveBefore", "notLast", "move_at"])
+      , not (ty `elem` ["isId", "last", "moveLt", "moveBefore", "notLast", "move_at"])
       ]
     intervals =
       [ I ty (L k) (R k)
@@ -80,7 +81,8 @@ tuplesToProblem tuples = Problem intervals constraints True
       , i == arg
       , let k = termToKey arg
       ]
-    constraints = eqs ++ lts
+    constraints = -- [CLt (left i) (right i) | i <- intervals] ++
+      eqs ++ lts
     eqs =
       [ CEq t1 t2
       | [D.TermPred "eq", D.TermApp c1 [arg1], D.TermApp c2 [arg2]] <- tuples

@@ -22,7 +22,7 @@ var = v
     v = T.FreeVar <$> variable
 
 term :: Parser T.Term
-term = app <|> cv <|> fv <|> v <|> p <|> rand <|> b <|> n
+term = app <|> cv <|> fv <|> v <|> p <|> rand <|> b <|> n <|> binop
   where
     v = T.TermVar <$> var
     p = T.TermPred <$> pred
@@ -32,6 +32,8 @@ term = app <|> cv <|> fv <|> v <|> p <|> rand <|> b <|> n
     b = pure T.TermBlank <* char '_'
     n = T.TermNum <$> nat
     app = T.TermApp <$> predicate <*> parens (commaSep term)
+    binop = parens $ flip T.TermBin <$> term <*> (ws *> op <* ws) <*> term
+    op = (char '+' *> pure T.BinAdd) <|> (char '-' *> pure T.BinSub)
 
 mvar :: (T.Name -> T.Var) -> Parser T.PVar
 mvar ty = do

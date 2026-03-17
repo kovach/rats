@@ -13,3 +13,6 @@ diagrams/*.svg
 diagrams/*.pdf
 rust-derp/target/
 target/
+*elab*
+flamegraph*
+out.*

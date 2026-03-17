@@ -14,25 +14,50 @@ moveBefore I1 It T, moveBefore I2 It T, lt r(I1) l(I2)
 ---
 notLast I1 It T.
 
+
+move M1 It _, move M2 It _, lt r(M1) l(M2)
+---
+moveLt M1 M2.
+
 moveBefore I It T, !notLast I It T
 ----------------------------------
 last I It T.
 
-move M It At, NewId = id("at", bind(M, nil()))
+move M It To, AT = id("at", bind(M, nil()))
 ----------------------------------------------
-isId NewId, at NewId It At, move_at M NewId, eq l(NewId) r(M).
+isId AT, at AT It To, move_at M AT, eq l(AT) r(M), lt l(AT) r(AT).
 
-isId T, last Move _ l(T), move_at Move Id
---------------------------------------
-lt l(T) r(Id).
+;isId T, last Move _ l(T), move_at Move Id
+;--------------------------------------
+;lt l(T) r(Id).
+;move_at M1 A1, move_at M2 A2, moveLt M1 M2
+;---
+;lt r(A1) r(M2).
 
-; ?turn / ∃choice ?C.
-; ->
-; turn T, CHOICE = id(...), C = choice(id(...))
-; --
-; try choice(CHOICE, C).
-; split separate rule, so base rule is simpler?
 
-; try choice(CH, ...), !chose(CH)
+
+;choose C1, choose C2, lt l(C1) l(C2)
+;---
+;choose/choose C2 C1 C2.
+;
+;choose/choose _ C1 C2, choose/choose _ C2 C3
+;--
+;not-immediate C3 C1 C3.
+;
+;choose/choose _ C1 C2, !not-immediate _ C1 C2 -- choose/immediate C2 C1 C2.
+;
+;choose C, !choose/choose _ _ C -- choose/index C C 1.
+;choose C, choose/index _ C I, choose/immediate _ C C2 -- choose/index C2 C2 (I + 1).
+
+;turn I1, buy I2, lt l(I1) l(I2), lt r(I2) r(I1)
+;---
+;turn/buy I1 I2.
+; lt l(I1) l(I2), lt r(I2) r(I1) -- outer/inner I1 I2.
+; turn I1, buy I2, outer/inner I1 I2
 ; ---
-; choice CH ....
+; turn/buy I1 I2.
+; turn/buy T _ -- bought T.
+; turn T, discard D hermit, outer/inner T D, !bought T -- gain-madman it.
+
+; lt l(A) B, lt B r(A) -- interval/point A B.
+

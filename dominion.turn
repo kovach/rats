@@ -4,7 +4,8 @@
 r1:  ?turn / ( !action-phase; !buy-phase; !cleanup-phase ).
 
 -- In your Action phase, you can play one Action card from your hand.
-r2:  ?action-phase / (
+r2:
+?action-phase / (
   !choose-action ~> ?it A;
   !play-action ~> !it A
 ).
@@ -16,7 +17,8 @@ r2:  ?action-phase / (
 --   announcing it;
 --   moving it to the "in play" area - [...]; and
 --   following the instructions on it...
-r3:  ?play-action ~> ?it A / (
+r3:
+?play-action ~> ?it A / (
   !announce      ~> !it A;
   !move          ~> !it A
                  ~> !to play-area;
@@ -121,4 +123,33 @@ r3:  ?play-action ~> ?it A / (
                  ~> ?to (:= play-area);
   !activate      ~> ?it (:= A)
 ).
+
+
+?activate ~> (?it ?card/name misfits)
+  / ( !choose-supply-card <~ (??it C, ¬command C, ¬duration C ~ !ok) )
+  / ( !play ~ !it C
+      / ( { move .~ ?it C .~ ?to play-area -> } )
+    ).
+
+?activate ~> (?it ?card/name misfits)
+  / ( ?choose-supply-card <~ (?it C, ¬command C, ¬duration C ~ ?ok) )
+  / ( ?play ~ ?it C
+      / ( ( ?move .~ ?it C .~ ?to play-area ~ !bad ) )
+    ).
+
+?activate ~> (?it ?card/name misfits)
+  / ( ?choose-supply-card ~> (??it C, ¬command C, ¬duration C; !ok) )
+  / ( ?play ~> ?it C
+    / ( ( ?move ~> (?it C | ?to play-area) ) ~ !bad ) )
+.
+-- bandit
+?activate ~> (?it ?card/name bandit)
+  / !gain ~ !type gold
+  / (?other-player T, !attack ~ !them T).
+?activate ~> (?it ?card/name bandit) / (?attack ~> ?them T)
+  / ![Temp]pile
+  / ( #[2] / ( (?your-top-deck-card C) @ ( !move ~ !it C ~ !to Temp ) ) )
+  / ( ??card C, ?treasure C, ¬copper C )
+  / !trash ~ !it C
+  / ( X ?at/ Temp @ !discard ~ !it X ).
 

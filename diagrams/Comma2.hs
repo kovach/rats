@@ -109,17 +109,19 @@ diagram = do
   gen (DottedLine 69 57 69 82) (Color 0 0 0)
   gen (DottedLine 111 57 111 82) (Color 0 0 0)
 
+  gen (Label (115 + 10) 65 "occ(A,B)") (Color 0 0 0)
+
   -- ?b: green rectangle (lower right), center (110,50)
   gen (Rectangle 70 150 45 55) (Color 156 206 173)
-  gen (Label 110 50 "? b") (Color 0 0 0)
+  gen (Label 110 50 "B") (Color 0 0 0)
 
   -- ?a: blue rectangle (upper left), center (70,35)
   gen (Rectangle 30 110 30 40) (Color 158 180 206)
-  gen (Label 70 35 "? a") (Color 0 0 0)
+  gen (Label 70 35 "A") (Color 0 0 0)
 
   -- !c: amber rectangle (new, below), center (90,77)
-  gen (Rectangle 70 110 72 82) (Color 236 180 58)
-  gen (Label 90 77 "! c") (Color 0 0 0)
+  gen (Rectangle 75 105 72 82) (Color 236 180 58)
+  gen (Label 90 77 "C") (Color 0 0 0)
 
   line svgClose
 

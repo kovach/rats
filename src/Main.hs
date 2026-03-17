@@ -26,6 +26,7 @@ import Derp.Parse
 import qualified Derp.Gen as GD
 import Server (runServer)
 import Compile
+import CatShelf
 
 main = do
   args <- getArgs

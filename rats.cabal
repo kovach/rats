@@ -71,6 +71,7 @@ executable rats
       , Types
       , Compile
       , Parser
+      , Parser2
       , CatShelf
 
       , Derp.Types, Derp.Core, Derp.Parse

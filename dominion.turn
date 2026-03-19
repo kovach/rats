@@ -125,31 +125,40 @@ r3:  ?play-action ~> ?it A / (
 ).
 
 
-?activate ~> (?it ?card/name misfits)
-  / ( !choose-supply-card <~ (??it C, ¬command C, ¬duration C ~ !ok) )
+?activate ~> ?name band-of-misfits
+  / ( !choose-supply-card ?C ~ !not (command C) ~ !not (duration C) )
   / ( !play ~ !it C
-      / ( { move .~ ?it C .~ ?to play-area -> } )
+      / ( { move ~> ?it C ~> ?to play-area -> !skip } )
     ).
 
-?activate ~> (?it ?card/name misfits)
-  / ( ?choose-supply-card <~ (?it C, ¬command C, ¬duration C ~ ?ok) )
-  / ( ?play ~ ?it C
-      / ( ( ?move .~ ?it C .~ ?to play-area ~ !bad ) )
-    ).
-
-?activate ~> (?it ?card/name misfits)
-  / ( ?choose-supply-card ~> (??it C, ¬command C, ¬duration C; !ok) )
-  / ( ?play ~> ?it C
-    / ( ( ?move ~> (?it C | ?to play-area) ) ~ !bad ) )
-.
 -- bandit
 ?activate ~> (?it ?card/name bandit)
-  / !gain ~ !type gold
-  / (?other-player T, !attack ~ !them T).
-?activate ~> (?it ?card/name bandit) / (?attack ~> ?them T)
+  / ( !gain ~ !type gold )
+  / ( ?other-player T, (!attack ~ !you T) ).
+
+?activate ~> (?it ?card/name bandit) / ?attack
   / ![Temp]pile
   / ( #[2] / ( (?your-top-deck-card C) @ ( !move ~ !it C ~ !to Temp ) ) )
-  / ( ??card C, ?treasure C, ¬copper C )
-  / !trash ~ !it C
-  / ( X ?at/ Temp @ !discard ~ !it X ).
+  / ( !choose ?C ~ !at C Temp ~ !treasure C ~ !not (copper C) )
+  / ( !trash ~ !it C )
+  / ( X ?at Temp @ !discard ~ !it X ).
 
+
+
+-- random lich notes that don't make sense:
+
+\begin{lstlisting}
+    -- immediate next turn
+    ?[T1]turn; ?[T2]would turn ~ !immediately-after T1
+    | ~(T1; ?would turn; T2)
+
+    -- incorrect: doesn't handle multiple liches
+    -- cancel the turn immediately succeeding a turn in which lich was played
+    ?[T1]turn / (?activate ~> ?it lich); (?turn -> .) ~ ?immediately-after T1.
+\end{lstlisting}
+
+\begin{lstlisting}
+    ?activate ~> ?it lich, active-player P ~> !turn-skip P.
+    (?turn -> !skip-turn)
+        ~> active-player P, ?turn-skip-count N, N > 0.
+\end{lstlisting}

@@ -150,6 +150,7 @@ executable draw-diagram
 
     build-depends:    base ^>=4.21.0.0,
                       diagrams-lib,
+                      containers,
                       diagrams-svg,
                       svg-builder,
                       colour,

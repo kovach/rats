@@ -53,31 +53,31 @@ data IntervalDiagram = IntervalDiagram
   }
 
 demoDiagrams =
-  [ IntervalDiagram "a / b" "over"$
-    prim "a" <> prim "b"
+  [ IntervalDiagram "A / B" "over"$
+    prim "A" <> prim "B"
     <> constraints
-      [ CLt (L "a") (L "b")
-      , CLt (R "b") (R "a") ]
-  , IntervalDiagram "a; b" "seq" $
-    prim "a" <> prim "b"
+      [ CLt (L "A") (L "B")
+      , CLt (R "B") (R "A") ]
+  , IntervalDiagram "A; B" "seq" $
+    prim "A" <> prim "B"
     <> constraints
-      [ CLt (R "a") (L "b") ]
-  , IntervalDiagram "a, b" "comma" $
-    prim "a" <> prim "b"
+      [ CLt (R "A") (L "B") ]
+  , IntervalDiagram "A, B" "comma" $
+    prim "A" <> prim "B"
     <> constraints
-      [ CLt (L "a") (L "b")
-      , CLt (L "b") (R "a")
-      , CLt (R "a") (R "b") ]
-  , IntervalDiagram "a @ b" "at" $
-    prim "a" <> prim "b"
+      [ CLt (L "A") (L "B")
+      , CLt (L "B") (R "A")
+      , CLt (R "A") (R "B") ]
+  , IntervalDiagram "A @ B" "at" $
+    prim "A" <> prim "B"
     <> constraints
-      [ CLt (L "a") (L "b")
-      , CLt (L "b") (R "a") ]
-  , IntervalDiagram "a ~> b" "attr" $
-    prim "a" <> prim "b"
+      [ CLt (L "A") (L "B")
+      , CLt (L "B") (R "A") ]
+  , IntervalDiagram "A ~> B" "attr" $
+    prim "A" <> prim "B"
     <> constraints
-      [ CLt (L "a") (L "b")
-      , CEq (R "a") (R "b") ]
+      [ CLt (L "A") (L "B")
+      , CEq (R "A") (R "B") ]
   , IntervalDiagram "several" "several" t2
   ]
 

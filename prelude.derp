@@ -25,15 +25,15 @@ last I It T.
 
 move M It To, AT = id("at", bind(M, nil()))
 ----------------------------------------------
-isId AT, at AT It To, move_at M AT, eq l(AT) r(M), lt l(AT) r(AT).
+isId AT, lt l(AT) r(AT), at AT It To, move_at M AT, eq l(AT) r(M).
 
-;isId T, last Move _ l(T), move_at Move Id
-;--------------------------------------
-;lt l(T) r(Id).
-;move_at M1 A1, move_at M2 A2, moveLt M1 M2
-;---
-;lt r(A1) r(M2).
+isId T, last Move _ l(T), move_at Move AT
+--------------------------------------
+lt l(T) r(AT).
 
+move_at M1 A1, moveLt M1 M2
+---
+lt r(A1) r(M2).
 
 
 ;choose C1, choose C2, lt l(C1) l(C2)

@@ -2,6 +2,8 @@ module DrawDiagram.Core where
 
 import Data.Maybe
 import Data.List
+import Data.Map.Strict (Map)
+import qualified Data.Map.Strict as Map
 import Diagrams.Prelude
 import Diagrams.Backend.SVG
 import qualified Data.Text as T
@@ -24,7 +26,13 @@ rowGap = 5
 
 -- | Render a list of top-level intervals into a diagram.
 renderIntervals :: [Interval] -> Diagram B
-renderIntervals ivs = position $ concat $ zipWith renderAt [0..] $ sortOn ivStart ivs
+renderIntervals ivs =
+  let sorted = sortOn ivStart ivs
+      selector = head . words . ivType
+      predicates = nub (map selector sorted)
+      colorMap = Map.fromList (zip predicates [0..])
+      colorOf iv = Map.findWithDefault 0 (selector iv) colorMap
+  in position $ concat $ map (\iv -> renderAt (colorOf iv) iv) sorted
 
 -- | Render an interval and its children, offset by a vertical depth.
 renderAt :: Int -> Interval -> [(P2 Double, Diagram B)]

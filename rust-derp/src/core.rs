@@ -1,6 +1,5 @@
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
-use std::cell::RefCell;
 
 use crate::types::*;
 use crate::sym::{Sym, Interner};
@@ -153,18 +152,18 @@ impl EvalStats {
 
 // -- eval_rule ----------------------------------------------------------------
 
-pub fn eval_rule(rule: &Rule, ts: &Tuples, check: &Tuples, table: &mut TermTable, stats: &mut EvalStats, is_sym: Option<Sym>) -> Vec<Vec<Tuple>> {
-    let mut results = Vec::new();
-    let mut slots = vec![ablank(); 30]; // TODO
-    for final_slots in eval_flat(&mut slots, &rule.body.val.flatten(), ts, check, table, stats, is_sym) {
-        // Substitute head
-        let head_tuples: Vec<Tuple> = rule.head.iter().map(|ht| {
-            sub_terms_compiled(&final_slots, ht, table)
-        }).collect();
-        results.push(head_tuples);
-    }
-    results
-}
+// pub fn eval_rule(rule: &Rule, ts: &Tuples, check: &Tuples, table: &mut TermTable, stats: &mut EvalStats, is_sym: Option<Sym>) -> Vec<Vec<Tuple>> {
+//     let mut results = Vec::new();
+//     let mut slots = vec![ablank(); 30]; // TODO
+//     for final_slots in eval_flat(&mut slots, &rule.body.val.flatten(), ts, check, table, stats, is_sym) {
+//         // Substitute head
+//         let head_tuples: Vec<Tuple> = rule.head.iter().map(|ht| {
+//             sub_terms_compiled(&final_slots, ht, table)
+//         }).collect();
+//         results.push(head_tuples);
+//     }
+//     results
+// }
 
 // -- Compiled expression compilation ------------------------------------------
 
@@ -642,23 +641,41 @@ pub fn eval1_spec(
 // -- iter ---------------------------------------------------------------------
 
 /// The fixpoint iteration loop.
-/// f: for each tuple, produces new head tuples
 /// worklist: FIFO queue of tuples to process
 /// db: accumulated database
 /// check: previous fixpoint (for negation)
 /// Returns (db, changed) where changed is the set of new tuples not in base.
 pub fn iter(
-    f: &mut dyn FnMut(&Tuple, &Tuples, &Tuples) -> Vec<Vec<Tuple>>,
+    specs: &mut HashMap<Sym, Vec<SpecializedRule>>,
     worklist: &mut Worklist,
     db: &mut Tuples,
     base: &Tuples,
     check: &Tuples,
+    table: &mut TermTable,
+    stats: &mut EvalStats,
+    intern: &Interner,
+    is_sym: Option<Sym>,
 ) -> bool {
     let mut changed = false;
 
     while let Some(t) = worklist.pop_front() {
         if !db.contains_tuple(&t) {
-            let new_thunks = f(&t, db, check);
+            let new_thunks = {
+                let pred = match t[0].as_ref() {
+                    Term::Pred(Name::Sym(sym)) => *sym,
+                    _ => { db.add_one(&t); continue; }
+                };
+                match specs.get_mut(&pred) {
+                    Some(spec_rules) => {
+                        let mut results = Vec::new();
+                        for spec_rule in spec_rules {
+                            results.extend(eval1_spec(spec_rule, &t, db, check, intern, table, stats, is_sym));
+                        }
+                        results
+                    }
+                    None => Vec::new(),
+                }
+            };
             for head_tuples in &new_thunks {
                 for tuple in head_tuples {
                     if !db.contains_tuple(tuple) {
@@ -679,9 +696,12 @@ pub fn iter(
 pub fn alt_iter(
     gas: usize,
     ts0: &HashSet<Tuple>,
-    f: &mut dyn FnMut(&Tuple, &Tuples, &Tuples) -> Vec<Vec<Tuple>>,
+    specs: &mut HashMap<Sym, Vec<SpecializedRule>>,
     v: &Tuples,
+    table: &mut TermTable,
+    stats: &mut EvalStats,
     intern: &Interner,
+    is_sym: Option<Sym>,
 ) -> Tuples {
     if gas == 0 {
         panic!("gas exhausted");
@@ -692,7 +712,7 @@ pub fn alt_iter(
     // First forward pass
     let mut wl1: Worklist = ts0.iter().cloned().collect();
     let mut db1 = v.empty_clone();
-    let gen1 = iter(f, &mut wl1, &mut db1, v, v); // on first run: everything treated as false
+    let _gen1 = iter(specs, &mut wl1, &mut db1, v, v, table, stats, intern, is_sym); // on first run: everything treated as false
                                                   // yields over-approx of solution
 
     // eprintln!("db1({}): {}", gen1, db1.pp_derp(intern));
@@ -702,13 +722,13 @@ pub fn alt_iter(
     // uses `check` (the stable previous fixpoint) and needs pass 2 to activate.
     let mut wl2: Worklist = ts0.iter().cloned().collect();
     let mut db2 = v.empty_clone();
-    let gen2 = iter(f, &mut wl2, &mut db2, v, &db1); // anything outside db1 (over-approx) treated as false.
+    let gen2 = iter(specs, &mut wl2, &mut db2, v, &db1, table, stats, intern, is_sym); // anything outside db1 (over-approx) treated as false.
                                                      // yields under-approx of solution
 
     // eprintln!("db2({}): {}", gen2, db2.pp_derp(intern));
     if !gen2 { return db2 };
 
-    alt_iter(gas - 1, ts0, f, &db2, intern)
+    alt_iter(gas - 1, ts0, specs, &db2, table, stats, intern, is_sym)
 }
 
 // -- iter_rules --------------------------------------------------
@@ -717,51 +737,23 @@ pub fn iter_rules(initial: HashSet<Tuple>, all_rules: Vec<Rule>, intern: &Intern
     let (mut start, mut specs) = prespecialize(all_rules, intern, reorder);
     let is_sym = intern.get("is");
 
-    let table = Rc::new(RefCell::new(TermTable::new()));
-    let stats = Rc::new(RefCell::new(EvalStats::new()));
+    let mut table = TermTable::new();
+    let mut stats = EvalStats::new();
 
     let mut ts0 = initial;
     // Apply unit-body rules to get initial tuples
-    {
-        let mut tbl = table.borrow_mut();
-        let mut st = stats.borrow_mut();
-        for rule in &mut start {
-            let mut ts = Vec::new();
-            eval_spec_entry(rule, &unit_tuple(), &Tuples::new(), &Tuples::new(), &mut ts, &mut tbl, &mut st, is_sym);
-            for hts in ts {
-                for t in hts {
-                    ts0.insert(t);
-                }
+    for rule in &mut start {
+        let mut ts = Vec::new();
+        eval_spec_entry(rule, &unit_tuple(), &Tuples::new(), &Tuples::new(), &mut ts, &mut table, &mut stats, is_sym);
+        for hts in ts {
+            for t in hts {
+                ts0.insert(t);
             }
         }
     }
 
-    let table_clone = Rc::clone(&table);
-    let stats_clone = Rc::clone(&stats);
-    let mut f = move |t: &Tuple, old: &Tuples, check: &Tuples| -> Vec<Vec<Tuple>> {
-        let pred = match t[0].as_ref() {
-            Term::Pred(Name::Sym(sym)) => *sym,
-            _ => return Vec::new(),
-        };
-        match specs.get_mut(&pred) {
-            Some(spec_rules) => {
-                let mut tbl = table_clone.borrow_mut();
-                let mut st = stats_clone.borrow_mut();
-                let mut results = Vec::new();
-                for spec_rule in spec_rules {
-                    results.extend(eval1_spec(spec_rule, t, old, check, intern, &mut tbl, &mut st, is_sym));
-                }
-                results
-            }
-            None => Vec::new(),
-        }
-    };
-
     let template = Tuples::with_indices(index_specs);
-    let tuples = alt_iter(10, &ts0, &mut f, &template, intern);
-    drop(f);
-    let tbl = Rc::try_unwrap(table).unwrap().into_inner();
-    let st = Rc::try_unwrap(stats).unwrap().into_inner();
-    (tuples, tbl, st)
+    let tuples = alt_iter(10, &ts0, &mut specs, &template, &mut table, &mut stats, intern, is_sym);
+    (tuples, table, stats)
 }
 

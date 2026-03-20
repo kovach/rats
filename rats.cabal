@@ -106,6 +106,7 @@ executable rats
                       diagrams-svg,
                       svg-builder,
                       colour,
+                      directory
 
 
     -- Directories containing source files.

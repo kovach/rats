@@ -20,6 +20,7 @@ import Data.Set (Set)
 import qualified Data.Set as Set
 import Debug.Trace
 import System.Process
+import System.Directory (createDirectoryIfMissing)
 
 import Basic
 import Types
@@ -606,7 +607,7 @@ main1 :: String -> IO String
 main1 base = do
   (result, elabText, ruleText) <- genDerp base
   putStrLn $ "generated derp:\n" <> ruleText
-  let outFile = (base ++ ".derp")
+  let outFile = base <> ".gen.derp"
   writeFile outFile result
   writeFile (base ++ ".elab.turn") elabText
   putStrLn $ "wrote file " <> outFile

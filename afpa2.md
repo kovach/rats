@@ -3,8 +3,12 @@
 
 A *trajectory* is a finite set of tuples and a direction marker (up or down)
 step :: Trajectory -> Trajectory
-it uses the input trajectory to update *negative matches*
-  - for each t in the trajectory:
+the AFP algorithm computes a series of alternating trajectories until reaching a fixpoint; either:
+  - empty trajectory (all atoms get truth value from most recent iteration)
+  - a pair of adjacent trajectories that are equal in opposite directions (they contain the atoms with no truth value)
+
+step uses the input trajectory to update *negative matches*
+  - (phase 1) for each t in the trajectory:
     - we evaluate all the rules where t unifies with a negative atom
     - for each match, we add or subtract the consequent from the database
       - if the trajectory is up, t represents a newly asserted positive tuple in the over-approx.
@@ -12,7 +16,7 @@ it uses the input trajectory to update *negative matches*
       - conversely, if down, we add them to the db
     - as we add (or subtract), we check for any tuples that transition from (or to) count=0.
       we append these tuples to a list called fresh
-  - each of these tuples is a brand new added (or not brand new deleted) tuple
+  - (phase 2) each of these tuples is a brand new added (or not brand new deleted) tuple
     - we need to update the fixpoint with respect to these changes to positive slots.
     - now we step through the list, and for each t:
       - evaluate all the rules where t unifies with a positive atom
@@ -40,3 +44,85 @@ see [asdf](notes-on-query-derivative.md)
 We need to be more careful about the database state we use at each step of incremental evaluation.
 We also need to justify the claim that *DOWN* steps can be done by simply removing tuples, computing their prior consequences using the state we have, and iteratively removing them.
 
+define multiplicity fixpoint
+  ? fixpoint for operator that maps program to *derivation (rule match, head tuple) set* as opposed to *tuple set*
+
+## down step
+> We also need to justify the claim that *DOWN* steps can be done by simply removing tuples, computing their prior consequences using the state we have, and iteratively removing them.
+
+When we update the neg database, we just need to
+- pick out the derivations that used them (standard one at a time semi-naive)
+- handle any tuple that became relationally false (also to be done one at a time)
+- during phase 2, we don't need to worry about the state of the neg tuples that were undone, because every derivation that used one of those rules was handled immediately in phase 1
+  (any other rules with negative atoms were negative atoms that didn't change in phase 1, so their state is simple)
+- I think this is a fixpoint, and the right one
+  - at the end of the day we have a function thats monotone in two arguments, and we're reducing one of the arguments, then reducing the fixpoint on the other, so this should be easy to check and prove
+
+*BACKGROUND IDEA*: we modify the *store* to store two counts for each tuple: the value prior to the last update and the updated value.
+- If exactly one of these values is 0, call the tuple unstable; If these two values are equal, call it simple; otherwise modified.
+  We *resolve* a tuple by setting (prior = update, update = update).
+  After a fixpoint, we can immediately resolve the modified tuples.
+- We need to resolve the unstable tuples one at a time.
+  We use these as state for semi-naive: we process the pending tuples. when we process t, we make it stable (by setting (prior = update, update = update))
+
+!a -> b.
+!c -> d.
+b,d -> e.
+
+suppose neg set went from {a,c} to {}.
+all proofs need to be removed.
+remove b, then d. when removing b, d still present, so join in r3 passes, we remove e.
+when removing d, b has been removed. no join on r3.
+
+!a, !c -> b.
+when undoing {a}, c still present, so we undo b once. then we undo c, but a present, so no duplicate.
+
+*return value*
+during phase 2, some tuples become false. we need to yield these to the next step (which we do by leaving them unstable)
+  so we *do not* *resolve* the unstable positive tuples, we store them in an array and remove their derivations but leave them as q[n -> 0] in the store
+
+## up step
+So, some tuples have become unstable in the ->0 direction.
+say q[->0]
+
+p, !q -> r.
+r, !q -> s.
+
+during the fixpoint, we need to process r[0 -> 1] to derive s
+  this is different than the down step, where the negative part is constant, so we didn't have to handle q[->0] type transitions mid iteration
+  no i'm analogizing to the wrong thing: i did miss something
+we also need to *return* the fact that r[0 -> n>0] to the next phase
+
+## what state
+
+q can be in multiple states:
+  1  stable
+  2  unstable wrt phase 1 (needs to touch neg atoms during current phase)
+  3  unstable wrt current fixpoint (needs to touch pos atoms during 2)
+  2' unstable wrt next phase (needs to be output in trajectory)
+each unstable state has a direction, but we can encode that using the value (0 means it became false; n means it become true)
+2 is just 2' from the previous step
+
+if q[n -> 0], we don't really need to "store" the 0
+we don't need intermediate modified states (like 3 -> 2) just update to 2
+
+summary:
+  any modification updates the count immediately
+    if q transitions during phase 1, mark it as state 3 [1 -> 3]
+      as we resolve during phase 1, mark [2 -> 1] (only state-1 tuples participate in neg-atom queries)
+    if q transitions during phase 2, mark it as state 3 [1 -> 3]
+      as we resolve during phase 2, mark [3 -> 2]
+  query liveness during phases
+    phase 1:
+      initially all atoms in state 1 or 2; can do [1 -> 3] as you go
+      neg atoms query only q[1]
+      pos atoms query q[1] or q[2] or q[3] - (e.g. in DOWN step, q[2] is something that became *true* at previous step)
+    phase 2:
+      initially all atoms in state 1 or 3; can do [1 -> 2] as you go
+      neg atoms query prior state, which is ... q[1] (2 atoms are *newly true/false*)
+      pos atoms query q[1] or q[2]
+
+TODO ^ check these, they aren't done.
+
+question: states should be enough to encode the data in the trajectory (need another bit inside state 2 to mark up/down)
+  Do not implement it this way at first: list of unstable states needed for iteration, easier to reason about

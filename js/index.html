@@ -22,66 +22,105 @@
     .entry.down   { border-color: #2563eb; }
     .entry.result { border-color: #9333ea; }
     .entry-title { font-weight: bold; font-size: 13px; margin-bottom: 6px; }
-    .label { color: #64748b; font-size: 10px; text-transform: uppercase;
-             letter-spacing: 0.05em; margin-top: 6px; margin-bottom: 2px; }
-    .tuples, .db { color: #334155; line-height: 1.6; }
+    .label { color: #64748b; font-size: 10px; margin-top: 6px; margin-bottom: 2px; }
+    .tuples, .db { color: #334155; line-height: 1.6; padding-top: 2px; }
+    .traj-up   { background: #f0fdf4; border-radius: 3px; padding: 3px 6px; }
+    .traj-down { background: #fef2f2; border-radius: 3px; padding: 3px 6px; }
     .none { color: #94a3b8; }
     .error { color: #dc2626; padding: 12px; font-size: 13px; }
+    .cutoff-badge { display: inline-block; margin-left: 8px; padding: 1px 6px;
+                    background: #f59e0b; color: white; border-radius: 3px; font-size: 10px; }
+    details { margin-top: 4px; }
+    summary.label { cursor: pointer; user-select: none; list-style: none; display: flex; align-items: center; gap: 5px; }
+    summary.label::before { content: '▶'; font-size: 8px; color: #94a3b8; }
+    details[open] > summary.label::before { content: '▼'; }
   </style>
 </head>
 <body>
   <header>Datalog Evaluator</header>
   <div id="main">
     <div id="left">
-      <textarea id="editor" spellcheck="false">edge a b
-edge b c
-edge c d
-path X Y <- edge X Y
-path X Z <- path X Y, edge Y Z</textarea>
+      <textarea id="editor" spellcheck="false">edge a b.
+edge b c.
+edge c d.
+path X Y <- edge X Y.
+path X Z <-
+  path X Y,
+  edge Y Z.</textarea>
       <button id="run-btn" onclick="run()">&#9654; Run</button>
     </div>
     <div id="right"></div>
   </div>
 <script type="module">
-import { splitRules, prettyAtom } from './parse-rule.js';
-import { makeEvalFn } from './eval-fn.js';
+import { parseRules, prettyAtom } from './parse-rule.js';
+import { makeEvalFn, compileDerivatives, makeCompiledEvalFn } from './eval-fn.js';
 import { solveWithLog, tupleKey } from './eval.js';
+
+// ── config ────────────────────────────────────────────────────────────────────
+const DB_FOLD_THRESHOLD = 10;    // collapse a relation if it has this many or more tuples
+const MAX_INNER_ITERS  = 300;   // max iterations of the inner (positive) fixpoint per step
+const MAX_OUTER_STEPS  = 10;    // max steps of the alternating fixpoint
+const USE_COMPILED_EVAL = true; // use compiled derivatives (false = old single-literal evalFn)
 
 // ── rendering ─────────────────────────────────────────────────────────────────
 
-function renderD(D) {
-  const active = [];
-  for (const [key, count] of D) {
-    if (count > 0) active.push(JSON.parse(key));
-  }
-  active.sort((a, b) => tupleKey(a).localeCompare(tupleKey(b)));
-  if (active.length === 0) return '<span class="none">(empty)</span>';
-  return active.map(t => prettyAtom(t)).join('<br>');
+// inline=true: items on one line separated by commas
+// inline=false: items on separate lines
+// open=true: expanded by default
+function renderCollapsible(label, items, { inline = false, open = true, contentClass = '' } = {}) {
+  const empty = items.length === 0;
+  const content = empty
+    ? `<span class="none">(none)</span>`
+    : inline ? items.join(', ') : items.join('<br>');
+  const cls = [inline ? 'tuples' : 'db', contentClass].filter(Boolean).join(' ');
+  return `<details${open ? ' open' : ''}>
+      <summary class="label">${label}</summary>
+      <div class="${cls}">${content}</div>
+    </details>`;
 }
 
-function renderTuples(ts) {
-  if (ts.length === 0) return '<span class="none">(none)</span>';
-  return ts.map(t => prettyAtom(t)).join(', ');
+function activeTuples(D) {
+  const ts = [];
+  for (const [key, count] of D) if (count > 0) ts.push([JSON.parse(key), count]);
+  ts.sort(([a], [b]) => tupleKey(a).localeCompare(tupleKey(b)));
+  return ts;
+}
+
+function renderDb(D, { open = false } = {}) {
+  const tuples = activeTuples(D);
+  const inner = tuples.length === 0
+    ? `<div class="db"><span class="none">(none)</span></div>`
+    : [...Map.groupBy(tuples, ([t]) => t.name).entries()].map(([name, ts]) => {
+        const relOpen = ts.length < DB_FOLD_THRESHOLD;
+        const content = ts.map(([t, count]) =>
+          count === 1 ? prettyAtom(t) : `${prettyAtom(t)} <span style="color:#94a3b8">(×${count})</span>`
+        ).join('<br>');
+        return `<details${relOpen ? ' open' : ''}>
+          <summary class="label">${name} (${ts.length})</summary>
+          <div class="db">${content}</div>
+        </details>`;
+      }).join('');
+  return `<details${open ? ' open' : ''}>
+    <summary class="label">Database (${tuples.length})</summary>
+    ${inner}
+  </details>`;
 }
 
 function renderLog(log) {
   return [...log].reverse().map(entry => {
+    const badge = entry.cutoff ? `<span class="cutoff-badge">CUTOFF</span>` : '';
     if (entry.type === 'init') {
       return `<div class="entry init">
-        <div class="entry-title">Initialization</div>
-        <div class="label">Fresh (including facts)</div>
-        <div class="tuples">${renderTuples(entry.fresh)}</div>
-        <div class="label">Database</div>
-        <div class="db">${renderD(entry.D)}</div>
+        <div class="entry-title">Initialization${badge}</div>
+        ${renderCollapsible('Fresh (including facts)', entry.fresh.map(prettyAtom), { inline: true, open: true, contentClass: 'traj-up' })}
+        ${renderDb(entry.D, { open: true })}
       </div>`;
     } else {
       const cls = entry.inputDir === 'up' ? 'up' : 'down';
       return `<div class="entry ${cls}">
-        <div class="entry-title">Step ${entry.stepNum} &nbsp;${entry.inputDir.toUpperCase()} &rarr; ${entry.outputDir.toUpperCase()}</div>
-        <div class="label">Output trajectory</div>
-        <div class="tuples">${renderTuples(entry.fresh)}</div>
-        <div class="label">Database</div>
-        <div class="db">${renderD(entry.D)}</div>
+        <div class="entry-title">Step ${entry.stepNum} ${entry.outputDir.toUpperCase()}${badge}</div>
+        ${renderCollapsible('Output trajectory', entry.fresh.map(prettyAtom), { inline: true, open: true, contentClass: `traj-${entry.outputDir}` })}
+        ${renderDb(entry.D, { open: entry.cutoff })}
       </div>`;
     }
   }).join('');
@@ -91,22 +130,73 @@ function run() {
   const text = document.getElementById('editor').value;
   const output = document.getElementById('right');
   try {
-    const { facts, rules } = splitRules(text);
-    const { log, result } = solveWithLog(facts, rules, makeEvalFn(rules));
+    const allRules = parseRules(text);
+    save();
+    const facts = allRules.filter(r => r.body.length === 0).flatMap(r => r.head);
+    const rules = allRules.filter(r => r.body.length > 0);
+    const evalFn = USE_COMPILED_EVAL
+      ? makeCompiledEvalFn(compileDerivatives(rules), rules)
+      : makeEvalFn(rules);
+    const { log, result, cutoff } = solveWithLog(facts, rules, evalFn, { maxInner: MAX_INNER_ITERS, maxOuter: MAX_OUTER_STEPS });
+    const resultBadge = cutoff ? `<span class="cutoff-badge">CUTOFF</span>` : '';
     output.innerHTML = `<div class="entry result">
-      <div class="entry-title">Result</div>
-      <div class="db">${renderD(result)}</div>
+      <div class="entry-title">Result${resultBadge}</div>
+      ${renderDb(result, { open: true })}
     </div>` + renderLog(log);
   } catch (e) {
     output.innerHTML = `<div class="error">Error: ${e.message}</div>`;
   }
 }
 
+// WebSocket sync — optional (gracefully absent when opened without server)
+const ws = (() => { try { return new WebSocket(`ws://${location.host}`); } catch { return null; } })();
+
+function save() {
+  if (ws?.readyState === WebSocket.OPEN)
+    ws.send(document.getElementById('editor').value);
+}
+
+if (ws) {
+  ws.addEventListener('message', e => {
+    document.getElementById('editor').value = e.data;
+    run();
+  });
+}
+
 document.getElementById('editor').addEventListener('keydown', e => {
   if (e.key === 'Enter' && e.ctrlKey) { e.preventDefault(); run(); }
+  if (e.key === 's' && e.ctrlKey) { e.preventDefault(); save(); }
+  if (e.key === '/' && e.ctrlKey) {
+    e.preventDefault();
+    const ta = e.target;
+    const val = ta.value;
+    const { selectionStart: ss, selectionEnd: se } = ta;
+    const lineStart = val.lastIndexOf('\n', ss - 1) + 1;
+    const selEndAdj = se > ss && val[se - 1] === '\n' ? se - 1 : se;
+    const blockEnd = (() => { const i = val.indexOf('\n', selEndAdj); return i === -1 ? val.length : i; })();
+    const lines = val.slice(lineStart, blockEnd).split('\n');
+    ta.setSelectionRange(lineStart, blockEnd);
+    document.execCommand('insertText', false, lines.map(l => '; ' + l).join('\n'));
+    ta.setSelectionRange(ss + 2, se + 2 * lines.length);
+  }
+  if (e.key === 'x' && e.ctrlKey && e.target.selectionStart === e.target.selectionEnd) {
+    e.preventDefault();
+    const ta = e.target;
+    const val = ta.value;
+    const start = val.lastIndexOf('\n', ta.selectionStart - 1) + 1;
+    const end = val.indexOf('\n', ta.selectionStart);
+    const lineEnd = end === -1 ? val.length : end + 1;
+    const line = val.slice(start, lineEnd);
+    navigator.clipboard.writeText(line);
+    ta.setSelectionRange(start, lineEnd);
+    // https://developer.mozilla.org/en-US/docs/Web/API/Document/execCommand
+    document.execCommand('insertText', false, '');
+    ta.selectionStart = ta.selectionEnd = start;
+  }
 });
 
 run();
+document.getElementById('editor').focus();
 </script>
 </body>
 </html>

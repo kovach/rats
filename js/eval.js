@@ -36,30 +36,34 @@ function updateStore(D, delta) {
 //   zero-crossings to `fresh` until the list is exhausted (fixpoint).
 //
 // Returns: [fresh, opposite dir]
-function step(trajectory, D, evalFn) {
+function step(trajectory, D, evalFn, maxInner) {
   const [ts, dir] = trajectory;
   const D_last = new Map(D);
   const fresh = [];
 
   // Phase 1: negative matches for input tuples
   for (const t of ts) {
-    // evalFn(t, false, ...) finds negative body literal matches, returning -1 multiplicity.
-    // dir='up': -1 is correct (subtract). dir='down': flip to +1 (add).
+    // evalFn(t, false, ...) finds negative body literal matches.
+    // dir='up': flip to -1 (subtract).
     let delta = evalFn(t, false, D, D_last);
-    if (dir === 'down') delta = delta.map(([u, n]) => [u, -n]);
+    if (dir === 'up') delta = delta.map(([u, n]) => [u, -n]);
+    if (delta.length > 0)
+      console.log('delta: ', JSON.stringify(t), dir, JSON.stringify(delta));
     fresh.push(...updateStore(D, delta));
   }
 
   // Phase 2: positive matches for fresh tuples (growing-list fixpoint)
+  let innerCutoff = false;
   for (let i = 0; i < fresh.length; i++) {
-    // evalFn(t, true, ...) finds positive body literal matches, returning +1 multiplicity.
-    // dir='down': +1 is correct (add). dir='up': flip to -1 (subtract).
+    if (i >= maxInner) { innerCutoff = true; break; }
+    // evalFn(t, true, ...) finds positive body literal matches.
+    // dir='up': flip to -1 (subtract).
     let delta = evalFn(fresh[i], true, D, D_last);
     if (dir === 'up') delta = delta.map(([u, n]) => [u, -n]);
     fresh.push(...updateStore(D, delta));
   }
 
-  return [fresh, dir === 'up' ? 'down' : 'up'];
+  return { next: [fresh, dir === 'up' ? 'down' : 'up'], cutoff: innerCutoff };
 }
 
 function setsEqual(a, b) {
@@ -68,12 +72,6 @@ function setsEqual(a, b) {
   return true;
 }
 
-// Compute the well-founded semantics of a program.
-// program: { facts: Array<tuple>, rules: (passed to makeEvalFn externally) }
-// evalFn: built from the rule set
-// Returns: D (the last under-approximation = result of last DOWN-output step)
-// Returns the delta from rules whose body consists entirely of negative ground atoms.
-// With an empty D_last, all such negative literals trivially succeed.
 function negOnlyDelta(rules) {
   const isVar = s => typeof s === 'string' && s[0] >= 'A' && s[0] <= 'Z';
   const containsVar = t => Array.isArray(t) ? t.some(containsVar) : isVar(t);
@@ -90,42 +88,29 @@ function negOnlyDelta(rules) {
   return delta;
 }
 
-function solve(facts, rules, D, evalFn) {
-  // Initialize: add facts + results of negative-only rules, propagate with empty D_last.
-  const D_last_empty = new Map();
-  const fresh = [...updateStore(D, [...facts.map(f => [f, 1]), ...negOnlyDelta(rules)])];
-  for (let i = 0; i < fresh.length; i++) {
-    fresh.push(...updateStore(D, evalFn(fresh[i], true, D, D_last_empty)));
-  }
-
-  let trajectory = [fresh, 'up'];
-  let lastDownD = new Map(D);
-  let prevOutputTuples = null;
-
-  while (trajectory[0].length > 0) {
-    trajectory = step(trajectory, D, evalFn);
-
-    // A DOWN-output trajectory means we just completed an UP step = under-approximation.
-    if (trajectory[1] === 'down') lastDownD = new Map(D);
-
-    const outputTuples = new Set(trajectory[0].map(tupleKey));
-    if (prevOutputTuples !== null && setsEqual(prevOutputTuples, outputTuples)) break;
-    prevOutputTuples = outputTuples;
-  }
-
-  return lastDownD;
-}
-
-function solveWithLog(facts, rules, evalFn) {
+// Compute the well-founded semantics of a program.
+// program: { facts: Array<tuple>, rules: (passed to makeEvalFn externally) }
+// evalFn: built from the rule set
+// Returns: D (the last under-approximation = result of last DOWN-output step)
+// Returns the delta from rules whose body consists entirely of negative ground atoms.
+// With an empty D_last, all such negative literals trivially succeed.
+function solveWithLog(facts, rules, evalFn, { maxInner = 10000, maxOuter = 1000 } = {}) {
   const D = new Map();
   const log = [];
 
   const D_last_empty = new Map();
-  const fresh = [...updateStore(D, [...facts.map(f => [f, 1]), ...negOnlyDelta(rules)])];
+  const seeds = [...facts, ...negOnlyDelta(rules)];
+  const fresh = [...seeds];
+  let initCutoff = false;
   for (let i = 0; i < fresh.length; i++) {
+    if (i >= maxInner) { initCutoff = true; break; }
     fresh.push(...updateStore(D, evalFn(fresh[i], true, D, D_last_empty)));
+    // Only add the tuple itself to D if it's a seed (fact/negOnly). Derived tuples
+    // are already in D via the updateStore above; adding them again would overcount.
+    if (i < seeds.length) updateStore(D, [[fresh[i], 1]]);
   }
-  log.push({ type: 'init', fresh: [...fresh], D: new Map(D) });
+  log.push({ type: 'init', fresh: [...fresh], D: new Map(D), cutoff: initCutoff });
+  if (initCutoff) return { log, result: new Map(D), cutoff: true };
 
   let trajectory = [fresh, 'up'];
   let lastDownD = new Map(D);
@@ -133,18 +118,21 @@ function solveWithLog(facts, rules, evalFn) {
   let stepNum = 0;
 
   while (trajectory[0].length > 0) {
+    const outerCutoff = stepNum >= maxOuter;
     const inputDir = trajectory[1];
-    trajectory = step(trajectory, D, evalFn);
+    const { next, cutoff: innerCutoff } = step(trajectory, D, evalFn, maxInner);
+    trajectory = next;
     stepNum++;
     if (trajectory[1] === 'down') lastDownD = new Map(D);
     log.push({ type: 'step', stepNum, inputDir, outputDir: trajectory[1],
-               fresh: [...trajectory[0]], D: new Map(D) });
+               fresh: [...trajectory[0]], D: new Map(D), cutoff: innerCutoff || outerCutoff });
+    if (innerCutoff || outerCutoff) return { log, result: lastDownD, cutoff: true };
     const outputTuples = new Set(trajectory[0].map(tupleKey));
     if (prevOutputTuples !== null && setsEqual(prevOutputTuples, outputTuples)) break;
     prevOutputTuples = outputTuples;
   }
 
-  return { log, result: lastDownD };
+  return { log, result: lastDownD, cutoff: false };
 }
 
-export { step, solve, solveWithLog, updateStore, tupleKey, negOnlyDelta };
+export { solveWithLog, tupleKey };

@@ -1,9 +1,11 @@
 // Parser for rules of the form:
 //   p X, q X <- r X Y, !s Y
 //
-// Returns: { head: [['p','X'], ['q','X']], body: [{neg: false, atom: ['r','X','Y']}, {neg: true, atom: ['s','Y']}] }
+// Returns: { head: [atom, ...], body: [{neg: bool, atom}, ...] }
+// atom: { tag: 'atom', name: string, args: [term, ...] }
+// term: { tag: 'var', name } | { tag: 'sym', name } | { tag: 'compound', name, args: [term, ...] }
 //
-// Terms in argument positions still use parentheses: p s(X) -> p X
+// Vars are uppercase-initial; syms are lowercase-initial.
 
 // Split string by sep, but only at depth 0 (not inside parentheses)
 function splitTopLevel(s, sep) {
@@ -41,11 +43,18 @@ function tokenizeLiteral(s) {
   return tokens;
 }
 
+const IDENT         = /^[\w][\w\-\/]*$/;
+const BUILTIN_IDENT = /^#[\w][\w\-\/]*$/;
+
 function parseTerm(s) {
   s = s.trim();
-  const m = s.match(/^(\w+)\((.*)\)$/);
-  if (m) return [m[1], ...splitTopLevel(m[2], ',').map(parseTerm)];
-  if (s.match(/^\w+$/)) return s;
+  const m = s.match(/^([\w][\w\-\/]*)\((.*)\)$/);
+  if (m) return { tag: 'compound', name: m[1], args: splitTopLevel(m[2], ',').map(parseTerm) };
+  if (s === '_') return { tag: 'hole' };
+  if (IDENT.test(s)) {
+    const isUpper = s[0] >= 'A' && s[0] <= 'Z';
+    return isUpper ? { tag: 'var', name: s } : { tag: 'sym', name: s };
+  }
   throw new Error(`Invalid term: "${s}"`);
 }
 
@@ -54,14 +63,17 @@ function parseLiteral(s) {
   const neg = s.startsWith('!');
   if (neg) s = s.slice(1).trim();
   const [functor, ...argTokens] = tokenizeLiteral(s);
-  if (!functor || !functor.match(/^\w+$/)) throw new Error(`Invalid literal: "${s}"`);
-  return { neg, atom: [functor, ...argTokens.map(parseTerm)] };
+  if (BUILTIN_IDENT.test(functor))
+    return { neg, atom: { tag: 'builtin', name: functor, args: argTokens.map(parseTerm) } };
+  if (!functor || !IDENT.test(functor)) throw new Error(`Invalid literal: "${s}"`);
+  return { neg, atom: { tag: 'atom', name: functor, args: argTokens.map(parseTerm) } };
 }
 
 function parseRule(s) {
   s = s.trim();
   const backArrow = s.indexOf('<-');
   const fwdArrow  = s.indexOf('->');
+  const dashMatch = /-{2,}/.exec(s);
 
   let headStr, bodyStr;
   if (backArrow !== -1) {
@@ -70,6 +82,9 @@ function parseRule(s) {
   } else if (fwdArrow !== -1) {
     bodyStr = s.slice(0, fwdArrow).trim();
     headStr = s.slice(fwdArrow + 2).trim();
+  } else if (dashMatch) {
+    bodyStr = s.slice(0, dashMatch.index).trim();
+    headStr = s.slice(dashMatch.index + dashMatch[0].length).trim();
   } else {
     headStr = s;
     bodyStr = '';
@@ -86,33 +101,28 @@ function parseRule(s) {
   return { head, body };
 }
 
-// Split a block of text into facts (tuples) and proper rules.
-// Facts are lines with no body (no <- or empty body); proper rules have a non-empty body.
-// Blank lines and lines starting with // or # are ignored.
-function splitRules(text) {
-  const facts = [], rules = [];
-  for (const line of text.split('\n')) {
-    const s = line.trim();
-    if (!s || s.startsWith('//') || s.startsWith('#')) continue;
-    const r = parseRule(s);
-    if (r.body.length === 0) {
-      for (const atom of r.head) facts.push(atom);
-    } else {
-      rules.push(r);
-    }
-  }
-  return { facts, rules };
+// Parse a block of text into an array of rules.
+// Each rule must be terminated with a period. Rules may span multiple lines.
+// // and # begin line comments.
+function parseRules(text) {
+  const stripped = text.split('\n')
+    .map(line => { const i = line.search(/;|#(?!\w)/); return i === -1 ? line : line.slice(0, i); })
+    .join(' ');
+  return splitTopLevel(stripped, '.')
+    .map(s => s.trim())
+    .filter(s => s)
+    .map(parseRule);
 }
 
 function prettyTerm(term) {
-  if (!Array.isArray(term)) return term;
-  const [f, ...args] = term;
-  return args.length ? `${f}(${args.map(prettyTerm).join(', ')})` : f;
+  if (term.tag === 'hole') return '_';
+  if (term.tag === 'var' || term.tag === 'sym') return term.name;
+  return term.args.length ? `${term.name}(${term.args.map(prettyTerm).join(', ')})` : term.name;
 }
 
 function prettyAtom(atom) {
-  const [f, ...args] = atom;
-  return args.length ? `${f} ${args.map(prettyTerm).join(' ')}` : f;
+  // handles tag: 'atom' | 'builtin'
+  return atom.args.length ? `${atom.name} ${atom.args.map(prettyTerm).join(' ')}` : atom.name;
 }
 
 function prettyRule(rule) {
@@ -121,4 +131,4 @@ function prettyRule(rule) {
   return `${body} -> ${head}`;
 }
 
-export { parseRule, prettyRule, prettyAtom, splitRules };
+export { parseRule, parseRules, prettyRule, prettyAtom };

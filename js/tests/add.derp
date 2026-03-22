@@ -1,0 +1,8 @@
+x, #add 2 3 Z -> foo Z.
+x, #add 2 Y 5 -> bar Y.
+x, #add X 3 5 -> baz X.
+x, #add 2 3 5 -> all_ground_ok.
+x, #add 2 3 6 -> all_ground_fail.
+x, !#add 2 3 6 -> negation_ok.
+
+x.

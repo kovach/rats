@@ -2,7 +2,7 @@
 <html>
 <head>
   <meta charset="utf-8">
-  <title>Datalog Evaluator</title>
+  <title>DERP: deriving predicates</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: monospace; height: 100vh; display: flex; flex-direction: column; }
@@ -12,6 +12,7 @@
       --bg:        #ffffff;
       --bg-panel:  #f8fafc;
       --bg-entry:  #ffffff;
+      --bg-header: var(--bg-panel);
       --border:    #e2e8f0;
       --text:      #334155;
       --text-dim:  #64748b;
@@ -24,6 +25,7 @@
       --bg:        #0f172a;
       --bg-panel:  #1e293b;
       --bg-entry:  #1e293b;
+      --bg-header: #1e293b;
       --border:    #334155;
       --text:      #cbd5e1;
       --text-dim:  #94a3b8;
@@ -32,11 +34,11 @@
       --traj-down: #7f1d1d44;
     }
 
-    header { padding: 8px 16px; background: #1e293b; color: white; font-size: 14px; font-weight: bold; flex-shrink: 0;
+    header { padding: 8px 16px; background: var(--bg-header); color: var(--text); font-size: 14px; font-weight: bold; flex-shrink: 0;
              display: flex; align-items: center; justify-content: space-between; }
-    #dark-toggle { background: none; border: 1px solid #475569; color: #94a3b8; border-radius: 4px;
+    #dark-toggle, #help-btn { background: none; border: 1px solid var(--text-dim); color: var(--text-dim); border-radius: 4px;
                    padding: 2px 8px; cursor: pointer; font-size: 12px; font-family: monospace; }
-    #dark-toggle:hover { border-color: #94a3b8; color: white; }
+    #dark-toggle:hover, #help-btn:hover { border-color: white; color: white; }
     #main { display: flex; flex: 1; overflow: hidden; }
     #left { display: flex; flex-direction: column; width: 40%; border-right: 2px solid var(--border); }
     #editor { flex: 1; width: 100%; resize: none; font-family: monospace; font-size: 12px;
@@ -78,16 +80,39 @@
 
 </head>
 <body class="dark">
-  <header><span>Datalog Evaluator</span><button id="dark-toggle">light</button></header>
+  <header><span>DERP: deriving predicates</span><div style="display:flex;gap:8px"><button id="help-btn">help</button><button id="dark-toggle">light</button></div></header>
   <div id="main">
     <div id="left">
-      <textarea id="editor" spellcheck="false">edge a b.
-edge b c.
-edge c d.
-path X Y <- edge X Y.
-path X Z <-
-  path X Y,
-  edge Y Z.</textarea>
+      <textarea id="editor" spellcheck="false">
+edge A B
+-------------
+path A B 1 B.
+
+edge A B, path B C N _, #add 1 N M
+----------------------------------
+path A C M B.
+
+path A B M _, path A B N _, #lt M N
+-----------------------------------
+better-path A B N.
+
+path A B N NextNode, !better-path A B N
+---------------------------------------
+best-path A B N NextNode.
+
+; a -> x -> c
+; a -> y -> c
+; a -> c
+edge a x. edge x c.
+edge a y. edge y c.
+edge a c.
+
+; ── keybindings ──────────────────────────────
+; Ctrl+Enter   run
+; Ctrl+S       update URL with current program
+; Ctrl+/       comment/uncomment selected lines
+; Ctrl+X       cut current line
+</textarea>
       <div class="btn-row">
         <button id="run-btn">&#9654; Run</button>
         <button id="run-ref-btn">&#9654; Run (ref)</button>
@@ -170,7 +195,10 @@ function renderLog(log) {
       return `<div class="entry init">
         <div class="entry-title">Initialization${badge}</div>
         ${renderCollapsible('Seeds', entry.seeds.map(prettyAtom), { inline: true, open: true, contentClass: 'traj-up' })}
-        ${renderDb(entry.D, { open: true })}
+        <details>
+          <summary class="label">Details</summary>
+          ${renderDb(entry.D, { open: true })}
+        </details>
       </div>`;
     } else {
       const dirName = entry.direction === 1 ? 'UP' : 'DOWN';
@@ -299,6 +327,21 @@ document.getElementById('editor').addEventListener('keydown', e => {
 
 document.getElementById('run-btn').addEventListener('click', run);
 document.getElementById('run-ref-btn').addEventListener('click', runRef);
+
+const HELP_TEXT = `
+; ── keybindings ──────────────────────────────
+; Ctrl+Enter   run
+; Ctrl+S       update URL with current program
+; Ctrl+/       comment/uncomment selected lines
+; Ctrl+X       cut current line
+`.trimStart();
+
+document.getElementById('help-btn').addEventListener('click', () => {
+  const ta = document.getElementById('editor');
+  ta.focus();
+  ta.setSelectionRange(ta.value.trimEnd().length, ta.value.length);
+  document.execCommand('insertText', false, '\n\n' + HELP_TEXT);
+});
 
 const darkToggle = document.getElementById('dark-toggle');
 darkToggle.addEventListener('click', () => {

@@ -1,7 +1,20 @@
 import { tupleKey, applyBindings } from './util.js';
 
 const BUILTINS = {
-  '#lt': ([a, b]) => Number(a.name) < Number(b.name),
+  '#lt': ([a, b], bindings) => {
+    if (a.tag !== 'sym' || b.tag !== 'sym') throw new Error('Unbound variable in #lt');
+    return Number(a.name) < Number(b.name) ? bindings : false;
+  },
+  '#add': ([a, b, c], bindings) => {
+    const isGround = t => t.tag !== 'var' && t.tag !== 'hole';
+    const [aG, bG, cG] = [isGround(a), isGround(b), isGround(c)];
+    if ([aG, bG, cG].filter(Boolean).length < 2)
+      throw new Error('#add requires at least 2 ground arguments');
+    const sym = n => ({ tag: 'sym', name: String(n) });
+    if (aG && bG) return unify(c, sym(Number(a.name) + Number(b.name)), bindings) ?? false;
+    if (aG && cG) return unify(b, sym(Number(c.name) - Number(a.name)), bindings) ?? false;
+    /* bG && cG */ return unify(a, sym(Number(c.name) - Number(b.name)), bindings) ?? false;
+  },
 };
 
 function unify(pattern, value, bindings = {}) {
@@ -34,11 +47,11 @@ function solve(literals, bindings, D) {
 
   if (lit.atom.tag === 'builtin') {
     const ground = applyBindings(lit.atom, bindings);
-    if (ground.args.some(containsVar)) throw new Error(`Unbound variable in builtin: ${ground.name}`);
     const handler = BUILTINS[ground.name];
     if (!handler) throw new Error(`Unknown builtin: ${ground.name}`);
-    const result = handler(ground.args);
-    return (result !== lit.neg) ? solve(rest, bindings, D) : [];
+    const newBindings = handler(ground.args, bindings) ?? false;
+    if (lit.neg) return newBindings === false ? solve(rest, bindings, D) : [];
+    return newBindings !== false ? solve(rest, newBindings, D) : [];
   }
 
   if (lit.neg) {
@@ -187,11 +200,11 @@ function solveRef(literals, bindings, D_now, D_old) {
 
   if (lit.atom.tag === 'builtin') {
     const ground = applyBindings(lit.atom, bindings);
-    if (ground.args.some(containsVar)) throw new Error(`Unbound variable in builtin: ${ground.name}`);
     const handler = BUILTINS[ground.name];
     if (!handler) throw new Error(`Unknown builtin: ${ground.name}`);
-    const result = handler(ground.args);
-    return (result !== lit.neg) ? solveRef(rest, bindings, D_now, D_old) : [];
+    const newBindings = handler(ground.args, bindings) ?? false;
+    if (lit.neg) return newBindings === false ? solveRef(rest, bindings, D_now, D_old) : [];
+    return newBindings !== false ? solveRef(rest, newBindings, D_now, D_old) : [];
   }
 
   if (lit.neg) {

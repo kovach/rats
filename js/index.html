@@ -73,6 +73,9 @@
     summary.label::before { content: '▶'; font-size: 8px; color: var(--text-none); }
     details[open] > summary.label::before { content: '▼'; }
   </style>
+
+  <script language="javascript" src="client-deps/lz-string.min.js"></script>
+
 </head>
 <body class="dark">
   <header><span>Datalog Evaluator</span><button id="dark-toggle">light</button></header>
@@ -88,7 +91,7 @@ path X Z <-
       <div class="btn-row">
         <button id="run-btn">&#9654; Run</button>
         <button id="run-ref-btn">&#9654; Run (ref)</button>
-        <label id="trace-label"><input type="checkbox" id="trace-cb" checked> trace</label>
+        <label id="trace-label"><input type="checkbox" id="trace-cb"> trace</label>
       </div>
     </div>
     <div id="right"></div>
@@ -177,9 +180,12 @@ function renderLog(log) {
       return `<div class="entry ${cls}">
         <div class="entry-title">Step ${entry.stepNum} ${dirName}${badge}</div>
         ${renderCollapsible('Output trajectory', entry.changes.map(prettyAtom), { inline: true, open: true, contentClass: trajClass })}
-        ${renderTrace(entry.trace)}
-        ${entry.D_before ? renderDb(entry.D_before, { open: false, label: 'Database before' }) : ''}
-        ${renderDb(entry.D, { open: entry.cutoff, label: 'Database after' })}
+        <details>
+          <summary class="label">Details</summary>
+          ${renderTrace(entry.trace)}
+          ${entry.D_before ? renderDb(entry.D_before, { open: false, label: 'Database before' }) : ''}
+          ${renderDb(entry.D, { open: entry.cutoff, label: 'Database after' })}
+        </details>
       </div>`;
     }
   }).join('');
@@ -239,12 +245,17 @@ function run() {
   }
 }
 
+const USE_WEBSOCKET = false;
+
 // WebSocket sync — optional (gracefully absent when opened without server)
-const ws = (() => { try { return new WebSocket(`ws://${location.host}`); } catch { return null; } })();
+const ws = USE_WEBSOCKET ? (() => { try { return new WebSocket(`ws://${location.host}`); } catch { return null; } })() : null;
 
 function save() {
+  const editorValue = document.getElementById('editor').value;
   if (ws?.readyState === WebSocket.OPEN)
-    ws.send(document.getElementById('editor').value);
+    ws.send(editorValue);
+  const str = LZString.compressToBase64(editorValue);
+  location.hash = 'code/' + str;
 }
 
 if (ws) {
@@ -294,6 +305,9 @@ darkToggle.addEventListener('click', () => {
   const dark = document.body.classList.toggle('dark');
   darkToggle.textContent = dark ? 'light' : 'dark';
 });
+
+const hash = location.hash.startsWith('#code/') ? location.hash.slice(6) : null;
+if (hash) document.getElementById('editor').value = LZString.decompressFromBase64(hash);
 
 run();
 document.getElementById('editor').focus();

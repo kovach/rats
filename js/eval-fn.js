@@ -1,4 +1,4 @@
-import { tupleKey, negVisible, posVisible } from './eval.js';
+import { tupleKey, applyBindings } from './util.js';
 
 const BUILTINS = {
   '#lt': ([a, b]) => Number(a.name) < Number(b.name),
@@ -22,12 +22,6 @@ function unify(pattern, value, bindings = {}) {
   return b;
 }
 
-function applyBindings(term, bindings) {
-  if (term.tag === 'hole') return term;
-  if (term.tag === 'var') return (term.name in bindings) ? bindings[term.name] : term;
-  if (term.tag === 'sym') return term;
-  return { ...term, args: term.args.map(a => applyBindings(a, bindings)) };
-}
 
 // Find all binding extensions satisfying `literals` against D.
 // Positive literals use posVisible(D, key); negative use negVisible(D, key).
@@ -49,12 +43,11 @@ function solve(literals, bindings, D) {
 
   if (lit.neg) {
     if (pattern.args?.some(containsVar)) throw new Error(`Unbound variable in negative literal: ${JSON.stringify(pattern)}`);
-    return negVisible(D, tupleKey(pattern)) ? solve(rest, bindings, D) : [];
+    return D.negVisible(pattern) ? solve(rest, bindings, D) : [];
   } else {
     const results = [];
-    for (const [key] of D) {
-      if (!posVisible(D, key)) continue;
-      const tuple = JSON.parse(key);
+    for (const [tuple] of D) {
+      if (!D.posVisible(tuple)) continue;
       if (tuple.name !== pattern.name) continue;
       const newBindings = unify(pattern, tuple, bindings);
       if (newBindings === null) continue;

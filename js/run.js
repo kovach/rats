@@ -24,9 +24,15 @@ if (useRef) {
   ({ result } = solveWithLog(facts, rules, helpers, { maxInner: 300, maxOuter: 10 }));
 }
 
-for (const [key, e] of result) {
-  if ((e.current ?? e.count) > 0) {
-    const t = JSON.parse(key);
-    console.log(prettyAtom(t));
-  }
+const tuples = [];
+if (typeof result.activeTuples === 'function') {
+  for (const [tuple] of result.activeTuples()) tuples.push(prettyAtom(tuple));
+} else {
+  for (const [key, e] of result)
+    if ((e.current ?? e.count) > 0) tuples.push(prettyAtom(JSON.parse(key)));
+}
+tuples.sort();
+if (tuples.length > 0) {
+  console.log('--');
+  tuples.forEach((t, i) => console.log('  ' + t + (i < tuples.length - 1 ? ',' : '.')));
 }

@@ -96,7 +96,8 @@ path X Z <-
 <script type="module">
 import { parseRules, prettyAtom } from './parse-rule.js';
 import { compileDerivatives, makeHelpers, makeCompiledRefEvalFn, makeNegOnlyFn } from './eval-fn.js';
-import { solveWithLog, solveRefWithLog, tupleKey } from './eval.js';
+import { solveWithLog, solveRefWithLog } from './eval.js';
+import { tupleKey } from './util.js';
 
 // ── config ────────────────────────────────────────────────────────────────────
 const DB_FOLD_THRESHOLD = 10;    // collapse a relation if it has this many or more tuples
@@ -121,13 +122,14 @@ function renderCollapsible(label, items, { inline = false, open = true, contentC
 }
 
 function activeTuples(D) {
+  if (typeof D.activeTuples === 'function') return D.activeTuples();
   const ts = [];
   for (const [key, e] of D) if ((e.current ?? e.count) > 0) ts.push([JSON.parse(key), e.current ?? e.count]);
   ts.sort(([a], [b]) => tupleKey(a).localeCompare(tupleKey(b)));
   return ts;
 }
 
-function renderDb(D, { open = false } = {}) {
+function renderDb(D, { open = false, label = 'Database' } = {}) {
   const tuples = activeTuples(D);
   const inner = tuples.length === 0
     ? `<div class="db">(none)</div>`
@@ -142,7 +144,7 @@ function renderDb(D, { open = false } = {}) {
         </details>`;
       }).join('');
   return `<details${open ? ' open' : ''}>
-    <summary class="label">Database (${tuples.length})</summary>
+    <summary class="label">${label} (${tuples.length})</summary>
     ${inner}
   </details>`;
 }
@@ -171,11 +173,13 @@ function renderLog(log) {
       const dirName = entry.direction === 1 ? 'UP' : 'DOWN';
       const cls = entry.direction === 1 ? 'up' : 'down';
       const trajClass = entry.direction === 1 ? 'traj-up' : 'traj-down';
+      const beforeDb = entry.D_before ? renderDb(entry.D_before, { open: false }) : '';
       return `<div class="entry ${cls}">
         <div class="entry-title">Step ${entry.stepNum} ${dirName}${badge}</div>
         ${renderCollapsible('Output trajectory', entry.changes.map(prettyAtom), { inline: true, open: true, contentClass: trajClass })}
         ${renderTrace(entry.trace)}
-        ${renderDb(entry.D, { open: entry.cutoff })}
+        ${entry.D_before ? renderDb(entry.D_before, { open: false, label: 'Database before' }) : ''}
+        ${renderDb(entry.D, { open: entry.cutoff, label: 'Database after' })}
       </div>`;
     }
   }).join('');

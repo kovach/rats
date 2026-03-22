@@ -1,40 +1,7 @@
 // Incremental query evaluation — alternating fixpoint algorithm (afpa3)
-//
-// D: Map<string, {old: number, current: number}>
-//   old:     count used for negative literal visibility (old === 0 → neg succeeds)
-//   current: count used for positive literal visibility (current > 0 → pos succeeds)
 
-function tupleKey(t) {
-  return JSON.stringify(t);
-}
-
-function negVisible(D, key) {
-  const e = D.get(key);
-  return !e || e.old === 0;
-}
-
-function posVisible(D, key) {
-  const e = D.get(key);
-  return !!e && e.current > 0;
-}
-
-function wouldChange(D, tuple, direction) {
-  const e = D.get(tupleKey(tuple));
-  const c = e ? e.current : 0;
-  return (c === 0) !== (c + direction === 0);
-}
-
-function updateOld(D, tuple) {
-  const key = tupleKey(tuple);
-  const e = D.get(key) ?? { old: 0, current: 0 };
-  D.set(key, { old: e.current, current: e.current });
-}
-
-function updateCurrent(D, tuple, direction) {
-  const key = tupleKey(tuple);
-  const e = D.get(key) ?? { old: 0, current: 0 };
-  D.set(key, { old: e.old, current: e.current + direction });
-}
+import { tupleKey, applyBindings } from './util.js';
+import { Store } from './store.js';
 
 function setsEqual(a, b) {
   if (a.size !== b.size) return false;
@@ -43,7 +10,7 @@ function setsEqual(a, b) {
 }
 
 // Seeds from rules whose body is all-negative ground literals.
-// With an empty D (all old=0), every negative literal trivially succeeds.
+// With an empty Store (all old=0), every negative literal trivially succeeds.
 function negOnlySeeds(rules) {
   const containsVar = t => t.tag === 'var' || t.tag === 'hole' || (t.args?.some(containsVar) ?? false);
   const seeds = [];
@@ -53,6 +20,21 @@ function negOnlySeeds(rules) {
     for (const h of rule.head) { if (!containsVar(h)) seeds.push(h); }
   }
   return seeds;
+}
+
+class WL {
+  #l = [];
+  push({tuple,ty,w}) {
+    const node = this.#l.find(({k,t}) => Store.key(k) === Store.key(tuple) && t === ty);
+    if (node) { node.w += w }
+    else this.#l.push({tuple,ty,w});
+  }
+  get length() {
+    return this.#l.length;
+  }
+  get(i) {
+    return this.#l[i];
+  }
 }
 
 // One step of the alternating fixpoint (afpa3 algorithm).
@@ -66,110 +48,85 @@ function negOnlySeeds(rules) {
 // Returns { result, cutoff }
 //   result: new trajectory (tuples produced this step)
 function step(direction, changes, unifyNeg, unifyPos, solve, D, maxInner, trace = null) {
-  // seen: key -> { neg: number, pos: number } — accumulated counts per tuple.
-  // worklist: unique tuples in first-seen order.
-  const seen = new Map();
-  const worklist = [];
+  const worklist = new WL();
   for (const t of changes) {
-    const key = tupleKey(t);
-    if (!seen.has(key)) { seen.set(key, { neg: 0, pos: 0 }); worklist.push(t); }
-    seen.get(key).neg++;
+    worklist.push({tuple: t, ty: 'neg', w: 1});
   }
   const result = [];
 
   for (let i = 0; i < worklist.length; i++) {
     if (i >= maxInner) return { result, cutoff: true };
-    const tuple = worklist[i];
-    const counts = seen.get(tupleKey(tuple));
+    const {tuple, ty: dir, w: count} = worklist.get(i);
     const produced = [];
 
-    // Fire each unify function at most once per tuple, regardless of count.
-    // it is possible for both to fire (e.g. it was asserted previous round, but has become false this round)
-    const negMatches = counts.neg > 0 ? unifyNeg(tuple) : [];
-    const posMatches = counts.pos > 0 ? unifyPos(tuple) : [];
-    for (const { bindings, remainingBody, head } of [...negMatches, ...posMatches]) {
+    let matches = dir == 'neg' ? unifyNeg(tuple) : unifyPos(tuple);
+
+    for (const { bindings, remainingBody, head } of matches) {
+    // for (const { bindings, remainingBody, head } of [...negMatches, ...posMatches]) {
       for (const sol of solve(remainingBody, bindings, D)) {
         for (const h of head) {
-          const derived = applyBindingsExport(h, sol);
-          const dkey = tupleKey(derived);
-          if (wouldChange(D, derived, direction)) {
-            if (!seen.has(dkey)) { seen.set(dkey, { neg: 0, pos: 0 }); worklist.push(derived); }
-            seen.get(dkey).pos++;
+          const derived = applyBindings(h, sol);
+          const dkey = Store.key(derived);
+          if (D.wouldChange(derived, direction)) {
+            worklist.push({tuple: derived, ty: 'pos', w: 1});
             result.push(derived);
             produced.push(derived);
           } else {
-            updateCurrent(D, derived, direction);
+            D.updateCurrent(derived, direction);
+            D.updateOld(derived);
           }
         }
       }
     }
 
+    let counts = dir == 'neg' ? {neg:count,pos:0} : {neg:0, pos:count};
     if (trace) trace.push({ counts: { ...counts }, tuple, produced });
 
     // updateOld is idempotent — call once if any neg triggers.
-    if (counts.neg > 0) updateOld(D, tuple);
+    if (counts.neg > 0) D.updateOld(tuple);
     // updateCurrent once per pos derivation.
-    for (let c = 0; c < counts.pos; c++) updateCurrent(D, tuple, direction);
+    for (let c = 0; c < counts.pos; c++) D.updateCurrent(tuple, direction);
   }
 
   return { result, cutoff: false };
 }
 
-// applyBindings is defined in eval-fn.js; we need it here too for step().
-// Import it via a shared export from eval-fn, or duplicate the trivial version.
-// We receive it injected via the solve closure — but head patterns need it too.
-// Solution: eval-fn.js exports applyBindings and we import it.
-// For now, define a local copy (identical logic).
-function applyBindingsExport(term, bindings) {
-  if (term.tag === 'hole') return term;
-  if (term.tag === 'var') return (term.name in bindings) ? bindings[term.name] : term;
-  if (term.tag === 'sym') return term;
-  return { ...term, args: term.args.map(a => applyBindingsExport(a, bindings)) };
-}
-
 // Compute the well-founded semantics of a program.
 // Returns: { log, result, cutoff }
-// result: Map<key, {old, current}> — the last stable snapshot
+// result: Store — the last stable snapshot
 function solveWithLog(facts, rules, derivatives, { maxInner = 10000, maxOuter = 1000, tracing = false } = {}) {
-  // These are imported from eval-fn.js via the caller passing them in,
-  // but for architectural simplicity we import them at the top of this module.
-  // See bottom of file — unifyNeg/unifyPos/solve are passed in via `derivatives`.
-  // Actually: we receive pre-built helper functions via the `derivatives` parameter
-  // which is now { unifyNeg, unifyPos, solve } rather than compiled derivative array.
   const { unifyNeg, unifyPos, solve: solveBody } = derivatives;
 
-  const D = new Map();
+  const D = new Store();
   const log = [];
 
   // Init: compute positive closure of seeds with old=0 everywhere (all neg literals succeed).
-  // Process each new tuple through unifyPos to derive further tuples.
   const seeds = [...facts, ...negOnlySeeds(rules)];
   const initWorklist = [...seeds];
   let initCutoff = false;
   for (let i = 0; i < initWorklist.length; i++) {
     if (i >= maxInner) { initCutoff = true; break; }
     const t = initWorklist[i];
-    if (!wouldChange(D, t, +1)) {
-      updateCurrent(D, t, +1);
-      continue;
-    }
-    updateCurrent(D, t, +1);
-    for (const { bindings, remainingBody, head } of unifyPos(t)) {
-      for (const sol of solveBody(remainingBody, bindings, D)) {
-        for (const h of head) {
-          const derived = applyBindingsExport(h, sol);
-          if (wouldChange(D, derived, +1)) initWorklist.push(derived);
+    const crosses = D.wouldChange(t, +1);
+    D.updateCurrent(t, +1);
+    if (crosses) {
+      for (const { bindings, remainingBody, head } of unifyPos(t)) {
+        for (const sol of solveBody(remainingBody, bindings, D)) {
+          for (const h of head) {
+            const derived = applyBindings(h, sol);
+            if (D.wouldChange(derived, +1)) initWorklist.push(derived);
+          }
         }
       }
     }
   }
-  const initChanges = [...D.keys()].map(k => JSON.parse(k));
-  log.push({ type: 'init', seeds: initChanges, D: new Map(D), cutoff: initCutoff });
-  if (initCutoff) return { log, result: new Map(D), cutoff: true };
+  const initChanges = [...D].map(([t]) => t);
+  log.push({ type: 'init', seeds: initChanges, D: D.snapshot(), cutoff: initCutoff });
+  if (initCutoff) return { log, result: D.snapshot(), cutoff: true };
 
   let changes = initChanges;
   let direction = -1;
-  let lastStableD = new Map(D);
+  let lastStableD = D.snapshot();
   let prevChangeKeys = null;
   let stepNum = 0;
 
@@ -177,16 +134,21 @@ function solveWithLog(facts, rules, derivatives, { maxInner = 10000, maxOuter = 
     if (stepNum >= maxOuter) return { log, result: lastStableD, cutoff: true };
 
     const trace = tracing ? [] : null;
+    const D_before = D.snapshot();
     const { result, cutoff } = step(direction, changes, unifyNeg, unifyPos, solveBody, D, maxInner, trace);
     stepNum++;
 
-    log.push({ type: 'step', stepNum, direction, changes: result, D: new Map(D), cutoff, trace });
+    log.push({ type: 'step', stepNum, direction, changes: result, D_before, D: D.snapshot(), cutoff, trace });
     if (cutoff) return { log, result: lastStableD, cutoff: true };
 
-    if (direction === +1) lastStableD = new Map(D);
+    if (direction === -1) lastStableD = D.snapshot();
 
-    const changeKeys = new Set(result.map(tupleKey));
-    if (prevChangeKeys && setsEqual(prevChangeKeys, changeKeys)) break;
+    if (result.length === 0) {
+      lastStableD.updateAllOld();
+      break;
+    }
+    const changeKeys = new Set(result.map(Store.key));
+    if (prevChangeKeys && setsEqual(prevChangeKeys, changeKeys)) { break; }
     prevChangeKeys = changeKeys;
 
     direction = -direction;
@@ -218,6 +180,7 @@ function solveRefWithLog(facts, negOnlyFn, evalFnRef, { maxInner = 10000, maxOut
   const log = [];
   let D = new Map();
   let prevKeys = null, prevPrevKeys = null;
+  let direction = +1;
 
   for (let stepNum = 1; stepNum <= maxOuter; stepNum++) {
     const D_old = D;
@@ -228,12 +191,13 @@ function solveRefWithLog(facts, negOnlyFn, evalFnRef, { maxInner = 10000, maxOut
     if (cutoff) return { log, result: D, cutoff: true };
 
     const keys = new Set([...D.keys()]);
-    if (prevKeys && setsEqual(prevKeys, keys)) break;
-    if (prevPrevKeys && setsEqual(prevPrevKeys, keys)) break;
+    if (direction == -1 && prevKeys && setsEqual(prevKeys, keys)) break;
+    if (direction == -1 && prevPrevKeys && setsEqual(prevPrevKeys, keys)) break;
     prevPrevKeys = prevKeys;
     prevKeys = keys;
+    direction = -direction;
   }
   return { log, result: D, cutoff: false };
 }
 
-export { solveWithLog, stepRef, solveRefWithLog, tupleKey, negVisible, posVisible };
+export { solveWithLog, stepRef, solveRefWithLog };

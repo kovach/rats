@@ -1,0 +1,6 @@
+--
+  move a1 a2,
+  move a2 a1.
+
+!win a1 -- win a1.
+!win a2 -- win a2.

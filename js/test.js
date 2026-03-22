@@ -1,5 +1,10 @@
 import assert from 'assert';
-import { parseRule, prettyRule } from './parse-rule.js';
+import { readdirSync, readFileSync } from 'fs';
+import { join, dirname } from 'path';
+import { fileURLToPath } from 'url';
+import { parseRule, parseRules, prettyRule, prettyAtom } from './parse-rule.js';
+import { compileDerivatives, makeHelpers } from './eval-fn.js';
+import { solveWithLog } from './eval.js';
 
 function withTest(fn) {
   let struct = {passing: 0, failing: []}
@@ -32,16 +37,20 @@ const roundtripCases = [
   'p X Y ----- q X Y',
 ];
 
-  const correctness_tests = [
-    { name: 'rule_game1',
-      body: ` move a1 a2. move a2 a1. move a2 b. move b c. move A B, !win B -> win A.`,
-      expected: 'todo', // a1 a2 unset; b true; c false
-    },
-    { name: 'rule_game2',
-      body: `move a1 a2. move a2 a1. move a2 b. move A B, !win B -> win A.`,
-      expected: 'todo', // a1 false; a2 true; b false
-    }
-  ];
+const __dirname = dirname(fileURLToPath(import.meta.url));
+
+function runEval(src) {
+  const allRules = parseRules(src);
+  const facts = allRules.filter(r => r.body.length === 0).flatMap(r => r.head);
+  const rules = allRules.filter(r => r.body.length > 0);
+  const { result } = solveWithLog(facts, rules, makeHelpers(compileDerivatives(rules), rules));
+  return result;
+  const tuples = [];
+  for (const [tuple] of result.activeTuples()) tuples.push(prettyAtom(tuple));
+  tuples.sort();
+  if (tuples.length === 0) return '';
+  return '--\n' + tuples.map((t, i) => '  ' + t + (i < tuples.length - 1 ? ',' : '.')).join('\n');
+}
 
 withTest((struct) => {
 
@@ -53,8 +62,6 @@ withTest((struct) => {
       struct.failing.push([name, e.message]);
     }
   }
-
-
 
   test('#lt builtin in body', () => {
     const r = parseRule('small X <- num X, #lt X 5');
@@ -77,6 +84,24 @@ withTest((struct) => {
   for (const s of roundtripCases) {
     test(`roundtrip: ${s}`, () => {
       assert.deepStrictEqual(parseRule(prettyRule(parseRule(s))), parseRule(s));
+    });
+  }
+
+  const testsDir = join(__dirname, 'tests');
+  for (const f of readdirSync(testsDir).filter(f => f.endsWith('.expected.derp'))) {
+    const base = f.replace('.expected.derp', '');
+    const srcPath = join(testsDir, base + '.derp');
+    const tgtPath = join(testsDir, f);
+    test(`correctness: ${base}`, () => {
+      const src = readFileSync(srcPath, 'utf8');
+      const tgt = readFileSync(tgtPath, 'utf8');
+      const actual = runEval(src);
+      const expected = runEval(tgt);
+      actual.prune();
+      expected.prune();
+      // console.log('src:\n', actual.pretty());
+      // console.log('tgt:\n', expected.pretty());
+      assert.ok(actual.equals(expected));
     });
   }
 });

@@ -1,0 +1,10 @@
+; TODO: id the partial atoms (a1 a2) too
+--
+  move a1 a2,
+  move a2 a1,
+  move a2 b,
+  move b c,
+  win b.
+
+!win a1 -- win a1.
+!win a2 -- win a2.

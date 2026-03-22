@@ -6,38 +6,76 @@
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: monospace; height: 100vh; display: flex; flex-direction: column; }
-    header { padding: 8px 16px; background: #1e293b; color: white; font-size: 14px; font-weight: bold; flex-shrink: 0; }
+
+    /* ── light (default) ── */
+    :root {
+      --bg:        #ffffff;
+      --bg-panel:  #f8fafc;
+      --bg-entry:  #ffffff;
+      --border:    #e2e8f0;
+      --text:      #334155;
+      --text-dim:  #64748b;
+      --text-none: #94a3b8;
+      --traj-up:   #f0fdf4;
+      --traj-down: #fef2f2;
+    }
+    /* ── dark ── */
+    body.dark { color-scheme: dark;
+      --bg:        #0f172a;
+      --bg-panel:  #1e293b;
+      --bg-entry:  #1e293b;
+      --border:    #334155;
+      --text:      #cbd5e1;
+      --text-dim:  #94a3b8;
+      --text-none: #475569;
+      --traj-up:   #14532d44;
+      --traj-down: #7f1d1d44;
+    }
+
+    header { padding: 8px 16px; background: #1e293b; color: white; font-size: 14px; font-weight: bold; flex-shrink: 0;
+             display: flex; align-items: center; justify-content: space-between; }
+    #dark-toggle { background: none; border: 1px solid #475569; color: #94a3b8; border-radius: 4px;
+                   padding: 2px 8px; cursor: pointer; font-size: 12px; font-family: monospace; }
+    #dark-toggle:hover { border-color: #94a3b8; color: white; }
     #main { display: flex; flex: 1; overflow: hidden; }
-    #left { display: flex; flex-direction: column; width: 40%; border-right: 2px solid #e2e8f0; }
-    #editor { flex: 1; width: 100%; resize: none; font-family: monospace; font-size: 13px;
-              border: none; padding: 12px; outline: none; line-height: 1.6; }
-    #run-btn { padding: 10px; background: #2563eb; color: white; border: none;
-               cursor: pointer; font-size: 13px; font-family: monospace; flex-shrink: 0; }
+    #left { display: flex; flex-direction: column; width: 40%; border-right: 2px solid var(--border); }
+    #editor { flex: 1; width: 100%; resize: none; font-family: monospace; font-size: 12px;
+              border: none; padding: 12px; outline: none; line-height: 1.6;
+              background: var(--bg); color: var(--text); }
+    .btn-row { display: flex; flex-shrink: 0; background: var(--bg); }
+    #run-btn, #run-ref-btn { flex: 1; padding: 10px; color: white; border: none;
+               cursor: pointer; font-size: 13px; font-family: monospace; }
+    #run-btn { background: #2563eb; }
     #run-btn:hover { background: #1d4ed8; }
-    #right { flex: 1; overflow-y: auto; padding: 12px; background: #f8fafc; }
-    .entry { margin-bottom: 12px; padding: 10px 12px; background: white;
+    #run-ref-btn { background: #c2410c; }
+    #run-ref-btn:hover { background: #9a3412; }
+    #trace-label { display: flex; align-items: center; gap: 5px; padding: 0 10px;
+                   font-size: 12px; color: var(--text-dim); white-space: nowrap; }
+    #right { flex: 1; overflow-y: auto; padding: 12px; background: var(--bg-panel); }
+    .entry { margin-bottom: 12px; padding: 10px 12px; background: var(--bg-entry);
              border-radius: 4px; border-left: 4px solid #94a3b8; font-size: 12px; }
     .entry.init   { border-color: #16a34a; }
     .entry.up     { border-color: #dc2626; }
     .entry.down   { border-color: #2563eb; }
     .entry.result { border-color: #9333ea; }
-    .entry-title { font-weight: bold; font-size: 13px; margin-bottom: 6px; }
-    .label { color: #64748b; font-size: 10px; margin-top: 6px; margin-bottom: 2px; }
-    .tuples, .db { color: #334155; line-height: 1.6; padding-top: 2px; }
-    .traj-up   { background: #f0fdf4; border-radius: 3px; padding: 3px 6px; }
-    .traj-down { background: #fef2f2; border-radius: 3px; padding: 3px 6px; }
-    .none { color: #94a3b8; }
+    .entry.ref-result { border-color: #ea580c; }
+    .entry.ref-step  { border-color: #f97316; }
+    .entry-title { font-weight: bold; font-size: 13px; margin-bottom: 6px; color: var(--text); }
+    .label { color: var(--text-dim); font-size: 10px; margin-top: 6px; margin-bottom: 2px; }
+    .tuples, .db { color: var(--text); line-height: 1.6; padding-top: 2px; }
+    .traj-up   { background: var(--traj-up);   border-radius: 3px; padding: 3px 6px; }
+    .traj-down { background: var(--traj-down);  border-radius: 3px; padding: 3px 6px; }
     .error { color: #dc2626; padding: 12px; font-size: 13px; }
     .cutoff-badge { display: inline-block; margin-left: 8px; padding: 1px 6px;
                     background: #f59e0b; color: white; border-radius: 3px; font-size: 10px; }
     details { margin-top: 4px; }
     summary.label { cursor: pointer; user-select: none; list-style: none; display: flex; align-items: center; gap: 5px; }
-    summary.label::before { content: '▶'; font-size: 8px; color: #94a3b8; }
+    summary.label::before { content: '▶'; font-size: 8px; color: var(--text-none); }
     details[open] > summary.label::before { content: '▼'; }
   </style>
 </head>
-<body>
-  <header>Datalog Evaluator</header>
+<body class="dark">
+  <header><span>Datalog Evaluator</span><button id="dark-toggle">light</button></header>
   <div id="main">
     <div id="left">
       <textarea id="editor" spellcheck="false">edge a b.
@@ -47,20 +85,23 @@ path X Y <- edge X Y.
 path X Z <-
   path X Y,
   edge Y Z.</textarea>
-      <button id="run-btn" onclick="run()">&#9654; Run</button>
+      <div class="btn-row">
+        <button id="run-btn">&#9654; Run</button>
+        <button id="run-ref-btn">&#9654; Run (ref)</button>
+        <label id="trace-label"><input type="checkbox" id="trace-cb" checked> trace</label>
+      </div>
     </div>
     <div id="right"></div>
   </div>
 <script type="module">
 import { parseRules, prettyAtom } from './parse-rule.js';
-import { makeEvalFn, compileDerivatives, makeCompiledEvalFn } from './eval-fn.js';
-import { solveWithLog, tupleKey } from './eval.js';
+import { compileDerivatives, makeHelpers, makeCompiledRefEvalFn, makeNegOnlyFn } from './eval-fn.js';
+import { solveWithLog, solveRefWithLog, tupleKey } from './eval.js';
 
 // ── config ────────────────────────────────────────────────────────────────────
 const DB_FOLD_THRESHOLD = 10;    // collapse a relation if it has this many or more tuples
 const MAX_INNER_ITERS  = 300;   // max iterations of the inner (positive) fixpoint per step
 const MAX_OUTER_STEPS  = 10;    // max steps of the alternating fixpoint
-const USE_COMPILED_EVAL = true; // use compiled derivatives (false = old single-literal evalFn)
 
 // ── rendering ─────────────────────────────────────────────────────────────────
 
@@ -81,7 +122,7 @@ function renderCollapsible(label, items, { inline = false, open = true, contentC
 
 function activeTuples(D) {
   const ts = [];
-  for (const [key, count] of D) if (count > 0) ts.push([JSON.parse(key), count]);
+  for (const [key, e] of D) if ((e.current ?? e.count) > 0) ts.push([JSON.parse(key), e.current ?? e.count]);
   ts.sort(([a], [b]) => tupleKey(a).localeCompare(tupleKey(b)));
   return ts;
 }
@@ -89,7 +130,7 @@ function activeTuples(D) {
 function renderDb(D, { open = false } = {}) {
   const tuples = activeTuples(D);
   const inner = tuples.length === 0
-    ? `<div class="db"><span class="none">(none)</span></div>`
+    ? `<div class="db">(none)</div>`
     : [...Map.groupBy(tuples, ([t]) => t.name).entries()].map(([name, ts]) => {
         const relOpen = ts.length < DB_FOLD_THRESHOLD;
         const content = ts.map(([t, count]) =>
@@ -106,24 +147,70 @@ function renderDb(D, { open = false } = {}) {
   </details>`;
 }
 
+function renderTrace(trace) {
+  if (!trace || trace.length === 0) return '';
+  const rows = trace.map(({ sign, tuple, produced }) => {
+    const producedStr = produced.length === 0
+      ? '<span class="none">(empty)</span>'
+      : produced.map(u => prettyAtom(u)).join(', ');
+    return `<div><span style="color:#64748b">${sign === 'neg' ? '−' : '+'}</span> <b>${prettyAtom(tuple)}</b> → ${producedStr}</div>`;
+  });
+  return renderCollapsible('Trace', rows, { inline: false, open: false });
+}
+
 function renderLog(log) {
   return [...log].reverse().map(entry => {
     const badge = entry.cutoff ? `<span class="cutoff-badge">CUTOFF</span>` : '';
     if (entry.type === 'init') {
       return `<div class="entry init">
         <div class="entry-title">Initialization${badge}</div>
-        ${renderCollapsible('Fresh (including facts)', entry.fresh.map(prettyAtom), { inline: true, open: true, contentClass: 'traj-up' })}
+        ${renderCollapsible('Seeds', entry.seeds.map(prettyAtom), { inline: true, open: true, contentClass: 'traj-up' })}
         ${renderDb(entry.D, { open: true })}
       </div>`;
     } else {
-      const cls = entry.inputDir === 'up' ? 'up' : 'down';
+      const dirName = entry.direction === 1 ? 'UP' : 'DOWN';
+      const cls = entry.direction === 1 ? 'up' : 'down';
+      const trajClass = entry.direction === 1 ? 'traj-up' : 'traj-down';
       return `<div class="entry ${cls}">
-        <div class="entry-title">Step ${entry.stepNum} ${entry.outputDir.toUpperCase()}${badge}</div>
-        ${renderCollapsible('Output trajectory', entry.fresh.map(prettyAtom), { inline: true, open: true, contentClass: `traj-${entry.outputDir}` })}
+        <div class="entry-title">Step ${entry.stepNum} ${dirName}${badge}</div>
+        ${renderCollapsible('Output trajectory', entry.changes.map(prettyAtom), { inline: true, open: true, contentClass: trajClass })}
+        ${renderTrace(entry.trace)}
         ${renderDb(entry.D, { open: entry.cutoff })}
       </div>`;
     }
   }).join('');
+}
+
+function renderRefLog(log) {
+  return [...log].reverse().map(entry => {
+    const badge = entry.cutoff ? `<span class="cutoff-badge">CUTOFF</span>` : '';
+    return `<div class="entry ref-step">
+      <div class="entry-title">Ref step ${entry.stepNum}${badge}</div>
+      ${renderDb(entry.D, { open: entry.cutoff })}
+    </div>`;
+  }).join('');
+}
+
+function runRef() {
+  const text = document.getElementById('editor').value;
+  const output = document.getElementById('right');
+  try {
+    const allRules = parseRules(text);
+    save();
+    const facts = allRules.filter(r => r.body.length === 0).flatMap(r => r.head);
+    const rules = allRules.filter(r => r.body.length > 0);
+    const derivatives = compileDerivatives(rules);
+    const evalFnRef = makeCompiledRefEvalFn(derivatives, rules);
+    const negOnly = makeNegOnlyFn(rules);
+    const { log, result, cutoff } = solveRefWithLog(facts, negOnly, evalFnRef, { maxInner: MAX_INNER_ITERS, maxOuter: MAX_OUTER_STEPS });
+    const resultBadge = cutoff ? `<span class="cutoff-badge">CUTOFF</span>` : '';
+    output.innerHTML = `<div class="entry ref-result">
+      <div class="entry-title">Result (ref)${resultBadge}</div>
+      ${renderDb(result, { open: true })}
+    </div>` + renderRefLog(log);
+  } catch (e) {
+    output.innerHTML = `<div class="error">Error: ${e.message}</div>`;
+  }
 }
 
 function run() {
@@ -134,10 +221,10 @@ function run() {
     save();
     const facts = allRules.filter(r => r.body.length === 0).flatMap(r => r.head);
     const rules = allRules.filter(r => r.body.length > 0);
-    const evalFn = USE_COMPILED_EVAL
-      ? makeCompiledEvalFn(compileDerivatives(rules), rules)
-      : makeEvalFn(rules);
-    const { log, result, cutoff } = solveWithLog(facts, rules, evalFn, { maxInner: MAX_INNER_ITERS, maxOuter: MAX_OUTER_STEPS });
+    const derivatives = compileDerivatives(rules);
+    const helpers = makeHelpers(derivatives, rules);
+    const tracing = document.getElementById('trace-cb').checked;
+    const { log, result, cutoff } = solveWithLog(facts, rules, helpers, { maxInner: MAX_INNER_ITERS, maxOuter: MAX_OUTER_STEPS, tracing });
     const resultBadge = cutoff ? `<span class="cutoff-badge">CUTOFF</span>` : '';
     output.innerHTML = `<div class="entry result">
       <div class="entry-title">Result${resultBadge}</div>
@@ -193,6 +280,15 @@ document.getElementById('editor').addEventListener('keydown', e => {
     document.execCommand('insertText', false, '');
     ta.selectionStart = ta.selectionEnd = start;
   }
+});
+
+document.getElementById('run-btn').addEventListener('click', run);
+document.getElementById('run-ref-btn').addEventListener('click', runRef);
+
+const darkToggle = document.getElementById('dark-toggle');
+darkToggle.addEventListener('click', () => {
+  const dark = document.body.classList.toggle('dark');
+  darkToggle.textContent = dark ? 'light' : 'dark';
 });
 
 run();

@@ -2,8 +2,9 @@ p X, p Y, p Z, lt X Y, lt Y Z -- nn X Z.
 p X, p Y, lt X Y, !nn X Y -- next X Y.
 
 lt 3 5. lt 5 8. lt 3 8.
-p 5. p 8.
+p 3. p 5. p 8.
 
-p 3.
-
-; p X, p Y -- foo X Y.
+a 1.
+b 1.
+!a X, b X -- c X.
+!c _ -- d.

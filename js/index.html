@@ -65,6 +65,7 @@
     .entry-title { font-weight: bold; font-size: 13px; margin-bottom: 6px; color: var(--text); }
     .label { color: var(--text-dim); font-size: 10px; margin-top: 6px; margin-bottom: 2px; }
     .tuples, .db { color: var(--text); line-height: 1.6; padding-top: 2px; }
+    .db { border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px; margin-top: 4px; }
     .traj-up   { background: var(--traj-up);   border-radius: 3px; padding: 3px 6px; }
     .traj-down { background: var(--traj-down);  border-radius: 3px; padding: 3px 6px; }
     .error { color: #dc2626; padding: 12px; font-size: 13px; }
@@ -107,11 +108,22 @@ edge a x. edge x c.
 edge a y. edge y c.
 edge a c.
 
-; ── keybindings ──────────────────────────────
-; Ctrl+Enter   run
-; Ctrl+S       update URL with current program
-; Ctrl+/       comment/uncomment selected lines
-; Ctrl+X       cut current line
+; -- HELP --
+; Keybindings
+; - Ctrl+Enter   run
+; - Ctrl+S       update URL with current program
+; - Ctrl+/       comment/uncomment selected lines
+; - Ctrl+X       cut current line
+;
+; Syntax
+; an atom is a predicate followed by terms
+;   - predicates lowercase   foo, edge
+;   - variables upper case   X, Foo
+;   - comound terms          cons(V1, cons(V2, nil))
+;
+; - rules are written `head X <- body X` or
+;   `body X -> head X` or
+;   `body X --(-...) head X`.
 </textarea>
       <div class="btn-row">
         <button id="run-btn">&#9654; Run</button>
@@ -207,7 +219,7 @@ function renderLog(log) {
       const beforeDb = entry.D_before ? renderDb(entry.D_before, { open: false }) : '';
       return `<div class="entry ${cls}">
         <div class="entry-title">Step ${entry.stepNum} ${dirName}${badge}</div>
-        ${renderCollapsible('Output trajectory', entry.changes.map(prettyAtom), { inline: true, open: true, contentClass: trajClass })}
+        ${renderCollapsible('Output diff', entry.changes.map(prettyAtom), { inline: true, open: true, contentClass: trajClass })}
         <details>
           <summary class="label">Details</summary>
           ${renderTrace(entry.trace)}
@@ -238,7 +250,7 @@ function runRef() {
     const facts = allRules.filter(r => r.body.length === 0).flatMap(r => r.head);
     const rules = allRules.filter(r => r.body.length > 0);
     const derivatives = compileDerivatives(rules);
-    const evalFnRef = makeCompiledRefEvalFn(derivatives, rules);
+    const evalFnRef = makeCompiledRefEvalFn(derivatives);
     const negOnly = makeNegOnlyFn(rules);
     const { log, result, cutoff } = solveRefWithLog(facts, negOnly, evalFnRef, { maxInner: MAX_INNER_ITERS, maxOuter: MAX_OUTER_STEPS });
     const resultBadge = cutoff ? `<span class="cutoff-badge">CUTOFF</span>` : '';

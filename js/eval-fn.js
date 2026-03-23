@@ -149,11 +149,10 @@ function compileDerivatives(rules) {
   return compiled;
 }
 
-// Build { unifyNeg, unifyPos, solve } helpers for solveWithLog.
+// Build { unifyNeg, unifyPos } helpers for solveWithLog.
 //
 // unifyNeg(t) → [{bindings, remainingBody, head}]  — neg-triggered rule matches
 // unifyPos(t) → [{bindings, remainingBody, head}]  — pos-triggered (compiled) matches
-// solve       — the solve function above (shared)
 function makeHelpers(derivatives, rules) {
   function unifyNeg(t) {
     const matches = [];
@@ -186,7 +185,7 @@ function makeHelpers(derivatives, rules) {
     return matches;
   }
 
-  return { unifyNeg, unifyPos, solve };
+  return { unifyNeg, unifyPos };
 }
 
 // ── reference interpreter helpers ─────────────────────────────────────────────
@@ -225,7 +224,7 @@ function solveRef(literals, bindings, D_now, D_old) {
   }
 }
 
-function makeCompiledRefEvalFn(derivatives, rules) {
+function makeCompiledRefEvalFn(derivatives) {
   return function evalFnRef(t, D_now, D_old) {
     const results = [];
     for (const cd of derivatives) {
@@ -260,4 +259,4 @@ function makeNegOnlyFn(rules) {
   };
 }
 
-export { compileDerivatives, makeHelpers, solveRef, makeCompiledRefEvalFn, makeNegOnlyFn };
+export { compileDerivatives, makeHelpers, solve, solveRef, makeCompiledRefEvalFn, makeNegOnlyFn };

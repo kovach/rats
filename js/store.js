@@ -1,5 +1,19 @@
 import { prettyAtom } from './parse-rule.js';
 
+class TupleSet {
+  #it = new Set();
+  insert(tuple) {
+    const key = Store.key(tuple);
+    this.#it.add(key);
+  }
+  [Symbol.iterator]() {
+    return (function*(map) {
+      for (const key of map) yield JSON.parse(key);
+    })(this.#it);
+  }
+
+}
+
 // Store wraps the incremental evaluator's database.
 // D: { old: number, current: number } per tuple
 //   old:     used for negative literal visibility (old === 0 → neg succeeds)
@@ -42,7 +56,7 @@ class Store {
   }
 
   updateAllOld() {
-    for (const [key, e] of this.#map) {
+    for (const [_key, e] of this.#map) {
       e.old = e.current;
     }
   }
@@ -50,6 +64,7 @@ class Store {
   updateCurrent(tuple, direction) {
     const key = Store.key(tuple);
     const e = this.#map.get(key) ?? { old: 0, current: 0 };
+    if (e.current + direction < 0) throw 'no';
     this.#map.set(key, { old: e.old, current: e.current + direction });
   }
 
@@ -112,4 +127,4 @@ class Store {
   }
 }
 
-export { Store };
+export { Store, TupleSet };

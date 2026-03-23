@@ -11,7 +11,7 @@ function withTest(fn) {
   fn(struct);
   console.log(`PASSING COUNT: ${struct.passing}`);
   if (struct.failing.length > 0)
-    console.log(`FAILURES: ${struct.failing}`);
+    console.log(`FAILURES:\n${struct.failing}`);
   else
     console.log(`NO FAILURES`);
 
@@ -45,11 +45,6 @@ function runEval(src) {
   const rules = allRules.filter(r => r.body.length > 0);
   const { result } = solveWithLog(facts, rules, makeHelpers(compileDerivatives(rules), rules));
   return result;
-  const tuples = [];
-  for (const [tuple] of result.activeTuples()) tuples.push(prettyAtom(tuple));
-  tuples.sort();
-  if (tuples.length === 0) return '';
-  return '--\n' + tuples.map((t, i) => '  ' + t + (i < tuples.length - 1 ? ',' : '.')).join('\n');
 }
 
 withTest((struct) => {
@@ -99,8 +94,9 @@ withTest((struct) => {
       const expected = runEval(tgt);
       actual.prune();
       expected.prune();
-      // console.log('src:\n', actual.pretty());
-      // console.log('tgt:\n', expected.pretty());
+      if (!actual.equals(expected)) {
+      }
+      // todo: print database diff in this case
       assert.ok(actual.equals(expected));
     });
   }

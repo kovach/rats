@@ -85,47 +85,6 @@
   <div id="main">
     <div id="left">
       <textarea id="editor" spellcheck="false">
-edge A B
--------------
-path A B 1 B.
-
-edge A B, path B C N _, #add 1 N M
-----------------------------------
-path A C M B.
-
-path A B M _, path A B N _, #lt M N
------------------------------------
-better-path A B N.
-
-path A B N NextNode, !better-path A B N
----------------------------------------
-best-path A B N NextNode.
-
-; a -> x -> c
-; a -> y -> c
-; a -> c
-edge a x. edge x c.
-edge a y. edge y c.
-edge a c.
-
-; -- HELP --
-; Keybindings
-; - Ctrl+Enter   run
-; - Ctrl+S       update URL with current program
-; - Ctrl+/       comment/uncomment selected lines
-; - Ctrl+X       cut current line
-;
-; Syntax
-; An atom is a predicate followed by terms.
-;   - predicates lowercase   foo, edge
-;   - variables upper case   X, Foo
-;   - compound terms         cons(V1, cons(V2, nil))
-;
-; - Rules are written as:
-;   - `head X <- body X.`
-;   - `body X -> head X.`
-;   - `body X --(-...) head X.`
-;   - `head.`.
 </textarea>
       <div class="btn-row">
         <button id="run-btn">&#9654; Run</button>
@@ -346,11 +305,50 @@ document.getElementById('run-btn').addEventListener('click', run);
 document.getElementById('run-ref-btn').addEventListener('click', runRef);
 
 const HELP_TEXT = `
-; ── keybindings ──────────────────────────────
-; Ctrl+Enter   run
-; Ctrl+S       update URL with current program
-; Ctrl+/       comment/uncomment selected lines
-; Ctrl+X       cut current line
+; -- HELP --
+; Keybindings
+; - Ctrl+Enter   run
+; - Ctrl+s       update URL with current program
+; - Ctrl+/       comment/uncomment selected lines
+; - Ctrl+x       cut current line
+; - Ctrl+z       undo; e.g. remove this help text
+;
+; Syntax
+; An atom is a predicate followed by terms.
+;   - predicates lowercase   foo, edge
+;   - variables upper case   X, Foo
+;   - compound terms         cons(V1, cons(V2, nil))
+;
+; - Rules are written as:
+;   - \`head X <- body X.\`
+;   - \`body X -> head X.\`
+;   - \`body X --(-...) head X.\`
+;   - \`head.\`.
+`;
+
+const DEFAULT_PROGRAM = `
+edge A B
+-------------
+path A B 1 B.
+
+edge A B, path B C N _, #add 1 N M
+----------------------------------
+path A C M B.
+
+path A B M _, path A B N _, #lt M N
+-----------------------------------
+better-path A B N.
+
+path A B N NextNode, !better-path A B N
+---------------------------------------
+best-path A B N NextNode.
+
+; a -> x -> c
+; a -> y -> c
+; a -> c
+edge a x. edge x c.
+edge a y. edge y c.
+edge a c.
 `.trimStart();
 
 document.getElementById('help-btn').addEventListener('click', () => {
@@ -367,7 +365,10 @@ darkToggle.addEventListener('click', () => {
 });
 
 const hash = location.hash.startsWith('#code/') ? location.hash.slice(6) : null;
-if (hash) document.getElementById('editor').value = LZString.decompressFromBase64(hash);
+const initialEditorValue = hash
+  ? LZString.decompressFromBase64(hash)
+  : DEFAULT_PROGRAM + HELP_TEXT;
+document.getElementById('editor').value = initialEditorValue;
 
 run();
 document.getElementById('editor').focus();

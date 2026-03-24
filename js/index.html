@@ -116,14 +116,16 @@ edge a c.
 ; - Ctrl+X       cut current line
 ;
 ; Syntax
-; an atom is a predicate followed by terms
+; An atom is a predicate followed by terms.
 ;   - predicates lowercase   foo, edge
 ;   - variables upper case   X, Foo
-;   - comound terms          cons(V1, cons(V2, nil))
+;   - compound terms         cons(V1, cons(V2, nil))
 ;
-; - rules are written `head X <- body X` or
-;   `body X -> head X` or
-;   `body X --(-...) head X`.
+; - Rules are written as:
+;   - `head X <- body X.`
+;   - `body X -> head X.`
+;   - `body X --(-...) head X.`
+;   - `head.`.
 </textarea>
       <div class="btn-row">
         <button id="run-btn">&#9654; Run</button>

@@ -1,14 +1,21 @@
-import { parseRules, prettyAtom } from './parse-rule.js';
+import { parseRules, parseRulesWithRanges, prettyAtom } from './parse-rule.js';
 import { compileDerivatives, makeHelpers, makeCompiledRefEvalFn, makeNegOnlyFn } from './eval-fn.js';
 import { solveWithLog, solveRefWithLog } from './eval.js';
 import { readFileSync } from 'fs';
 
 const args = process.argv.slice(2);
-const useRef = args.includes('--ref');
+const useRef   = args.includes('--ref');
+const parseOnly = args.includes('--parse');
 const filePath = args.find(a => !a.startsWith('-'));
-if (!filePath) { console.error('Usage: node run.js [--ref] <file.derp>'); process.exit(1); }
+if (!filePath) { console.error('Usage: node run.js [--ref|--parse] <file.derp>'); process.exit(1); }
 
 const text = readFileSync(filePath, 'utf8');
+
+if (parseOnly) {
+  console.log(JSON.stringify(parseRulesWithRanges(text), null, 2));
+  process.exit(0);
+}
+
 const allRules = parseRules(text);
 const facts = allRules.filter(r => r.body.length === 0).flatMap(r => r.head);
 const rules = allRules.filter(r => r.body.length > 0);

@@ -6,6 +6,9 @@ import { parseRule, parseRules, prettyRule, prettyAtom } from './parse-rule.js';
 import { compileDerivatives, makeHelpers } from './eval-fn.js';
 import { solveWithLog } from './eval.js';
 
+const args = process.argv.slice(2);
+const singleTestBase = args.find(a => !a.startsWith('-'));
+
 function withTest(fn) {
   let struct = {passing: 0, failing: []}
   fn(struct);
@@ -65,14 +68,14 @@ withTest((struct) => {
     ]);
     assert.deepStrictEqual(r.body, [
       { neg: false, atom: { tag: 'atom',    name: 'num', args: [{ tag: 'var', name: 'X' }] } },
-      { neg: false, atom: { tag: 'builtin', name: '#lt', args: [{ tag: 'var', name: 'X' }, { tag: 'sym', name: '5' }] } },
+      { neg: false, atom: { tag: 'builtin', name: '#lt', args: [{ tag: 'var', name: 'X' }, { tag: 'num', value: 5 }] } },
     ]);
   });
 
   test('negated #lt builtin', () => {
     const r = parseRule('big X <- num X, !#lt X 5');
     assert.deepStrictEqual(r.body[1],
-      { neg: true, atom: { tag: 'builtin', name: '#lt', args: [{ tag: 'var', name: 'X' }, { tag: 'sym', name: '5' }] } },
+      { neg: true, atom: { tag: 'builtin', name: '#lt', args: [{ tag: 'var', name: 'X' }, { tag: 'num', value: 5 }] } },
     );
   });
 
@@ -82,22 +85,33 @@ withTest((struct) => {
     });
   }
 
-  const testsDir = join(__dirname, 'tests');
-  for (const f of readdirSync(testsDir).filter(f => f.endsWith('.expected.derp'))) {
-    const base = f.replace('.expected.derp', '');
+  function runOne(base, verbose=false) {
     const srcPath = join(testsDir, base + '.derp');
-    const tgtPath = join(testsDir, f);
+    const tgtPath = join(testsDir, base + '.expected.derp');
     test(`correctness: ${base}`, () => {
       const src = readFileSync(srcPath, 'utf8');
       const tgt = readFileSync(tgtPath, 'utf8');
       const actual = runEval(src);
       const expected = runEval(tgt);
-      actual.prune();
-      expected.prune();
+      actual.pruneFalse();
+      expected.pruneFalse();
       if (!actual.equals(expected)) {
       }
       // todo: print database diff in this case
       assert.ok(actual.equals(expected));
-    });
+      if(verbose) {
+        console.log('actual:', actual.pretty2());
+        console.log('expected:', expected.pretty2());
+      }
+    })
+  }
+
+  const testsDir = join(__dirname, 'tests');
+  for (const f of readdirSync(testsDir).filter(f => f.endsWith('.expected.derp'))) {
+    const base = f.replace('.expected.derp', '');
+    runOne(base);
+  }
+  if (singleTestBase) {
+    runOne(singleTestBase, true);
   }
 });

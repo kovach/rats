@@ -46,7 +46,7 @@ class Store {
     this.#map.set(key, { old: e.current, current: e.current });
   }
 
-  prune() {
+  pruneFalse() {
     const toDelete = [];
     for (const [key, e] of this.#map) {
       if (e.old === 0 && e.current === 0)
@@ -77,11 +77,15 @@ class Store {
   get size() { return this.#map.size; }
 
   equals(other) {
+    return this.equals_(other)  && other.equals_(this);
+  }
+
+  equals_(other) {
     // if (this.#map.size !== other.#map.size) return false;
     for (const [key, e] of this.#map) {
       const o = other.#map.get(key);
       if (!o || o.old !== e.old || o.current !== e.current) {
-        console.log('!!!!!!!!!!!!!!\n', key, e, o);
+        console.log('!!!!!!!!!!!!!!\n', key, e, o); // todo return diff
         return false;
       }
     }

@@ -61,8 +61,9 @@ function tokenizeLiteral(s) {
   return tokens;
 }
 
-const IDENT         = /^[\w][\w\-\/]*$/;
-const BUILTIN_IDENT = /^#[\w][\w\-\/]*$/;
+const IDENT         = /^[a-z\/][a-zA-Z0-9\/_\-']*$/;
+const VAR_IDENT     = /^[A-Z][a-zA-Z0-9\/_\-']*$/;
+const BUILTIN_IDENT = /^#[a-z\/][a-zA-Z0-9\/_\-']*$/;
 
 // Build a position map for use during parsing.
 // posMap[i] = { line, col } (1-indexed) for character i in the stripped string
@@ -112,7 +113,7 @@ function parseTerm(s, posMap, baseOff) {
   const range = posMap != null ? mkRange(posMap, baseOff, s.length) : undefined;
   const rng = range ? { range } : {};
 
-  const m = s.match(/^([\w][\w\-\/]*)\((.*)\)$/);
+  const m = s.match(/^([a-z\/][a-zA-Z0-9\/_\-']*)\((.*)\)$/);
   if (m) {
     const argsBaseOff = posMap != null ? baseOff + m[1].length + 1 : undefined; // skip "name("
     const args = splitTopLevel(m[2], ',').map(({ text, start }) =>
@@ -121,10 +122,9 @@ function parseTerm(s, posMap, baseOff) {
     return { tag: 'compound', name: m[1], args, ...rng };
   }
   if (s === '_') return { tag: 'hole', ...rng };
-  if (IDENT.test(s)) {
-    const isUpper = s[0] >= 'A' && s[0] <= 'Z';
-    return isUpper ? { tag: 'var', name: s, ...rng } : { tag: 'sym', name: s, ...rng };
-  }
+  if (/^\d+$/.test(s)) return { tag: 'num', value: parseInt(s, 10), ...rng };
+  if (VAR_IDENT.test(s)) return { tag: 'var', name: s, ...rng };
+  if (IDENT.test(s)) return { tag: 'sym', name: s, ...rng };
   throw parseError('Invalid term', s, posMap, baseOff);
 }
 
@@ -237,6 +237,7 @@ function parseRules(text) {
 
 function prettyTerm(term) {
   if (term.tag === 'hole') return '_';
+  if (term.tag === 'num') return String(term.value);
   if (term.tag === 'var' || term.tag === 'sym') return term.name;
   return term.args.length ? `${term.name}(${term.args.map(prettyTerm).join(', ')})` : term.name;
 }

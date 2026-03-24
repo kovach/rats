@@ -59,7 +59,8 @@ function negOnlySeeds(rules) {
   const containsVar = t => t.tag === 'var' || t.tag === 'hole' || (t.args?.some(containsVar) ?? false);
   const seeds = [];
   for (const rule of rules) {
-    if (rule.body.length === 0 || rule.body.some(l => !l.neg)) continue;
+    if (rule.body.length === 0 || rule.body.some(l => ( !l.neg && l.atom?.tag !== 'builtin' ))) continue;
+    // TODO: these cases should be rejected at parse time
     if (rule.body.some(l => containsVar(l.atom))) continue;
     for (const h of rule.head) { if (!containsVar(h)) seeds.push(h); }
   }

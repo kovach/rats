@@ -1,19 +1,22 @@
 import { tupleKey, applyBindings } from './util.js';
 
+const toNum = t => t.tag === 'num' ? t.value : Number(t.name);
+const fromNum = n => ({ tag: 'num', value: n });
+
 const BUILTINS = {
   '#lt': ([a, b], bindings) => {
-    if (a.tag !== 'sym' || b.tag !== 'sym') throw new Error('Unbound variable in #lt');
-    return Number(a.name) < Number(b.name) ? bindings : false;
+    if (a.tag !== 'sym' && a.tag !== 'num') throw new Error('Unbound variable in #lt');
+    if (b.tag !== 'sym' && b.tag !== 'num') throw new Error('Unbound variable in #lt');
+    return toNum(a) < toNum(b) ? bindings : false;
   },
   '#add': ([a, b, c], bindings) => {
     const isGround = t => t.tag !== 'var' && t.tag !== 'hole';
     const [aG, bG, cG] = [isGround(a), isGround(b), isGround(c)];
     if ([aG, bG, cG].filter(Boolean).length < 2)
       throw new Error('#add requires at least 2 ground arguments');
-    const sym = n => ({ tag: 'sym', name: String(n) });
-    if (aG && bG) return unify(c, sym(Number(a.name) + Number(b.name)), bindings) ?? false;
-    if (aG && cG) return unify(b, sym(Number(c.name) - Number(a.name)), bindings) ?? false;
-    /* bG && cG */ return unify(a, sym(Number(c.name) - Number(b.name)), bindings) ?? false;
+    if (aG && bG) return unify(c, fromNum(toNum(a) + toNum(b)), bindings) ?? false;
+    if (aG && cG) return unify(b, fromNum(toNum(c) - toNum(a)), bindings) ?? false;
+    /* bG && cG */ return unify(a, fromNum(toNum(c) - toNum(b)), bindings) ?? false;
   },
 };
 
@@ -25,6 +28,9 @@ function unify(pattern, value, bindings = {}) {
   }
   if (pattern.tag === 'sym') {
     return (value.tag === 'sym' && value.name === pattern.name) ? bindings : null;
+  }
+  if (pattern.tag === 'num') {
+    return (value.tag === 'num' && value.value === pattern.value) ? bindings : null;
   }
   if (value.tag !== pattern.tag || value.name !== pattern.name || value.args.length !== pattern.args.length) return null;
   let b = bindings;

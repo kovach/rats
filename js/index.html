@@ -327,15 +327,18 @@ document.getElementById('editor').addEventListener('keydown', e => {
     e.preventDefault();
     const ta = e.target;
     const val = ta.value;
-    const start = val.lastIndexOf('\n', ta.selectionStart - 1) + 1;
+    const lineStart = val.lastIndexOf('\n', ta.selectionStart - 1) + 1;
     const end = val.indexOf('\n', ta.selectionStart);
-    const lineEnd = end === -1 ? val.length : end + 1;
-    const line = val.slice(start, lineEnd);
-    navigator.clipboard.writeText(line);
-    ta.setSelectionRange(start, lineEnd);
+    const isLastLine = end === -1;
+    const lineEnd = isLastLine ? val.length : end + 1;
+    // When cutting the last line, also remove the preceding newline so the
+    // cursor lands at the end of the previous line rather than an empty tail.
+    const deleteStart = (isLastLine && lineStart > 0) ? lineStart - 1 : lineStart;
+    navigator.clipboard.writeText(val.slice(lineStart, lineEnd));
+    ta.setSelectionRange(deleteStart, lineEnd);
     // https://developer.mozilla.org/en-US/docs/Web/API/Document/execCommand
     document.execCommand('insertText', false, '');
-    ta.selectionStart = ta.selectionEnd = start;
+    ta.selectionStart = ta.selectionEnd = deleteStart;
   }
 });
 

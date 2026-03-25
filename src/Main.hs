@@ -1,41 +1,31 @@
 module Main where
 
-import Prelude hiding (pred, exp, take)
-import Control.Monad.Writer
-import Control.Monad.State
-import Control.Monad
-import Data.Monoid (Sum(..))
-import Data.List hiding (take)
+import Data.List (isSuffixOf)
 import qualified Data.List
-import Data.Maybe
+import Data.Maybe (fromMaybe)
 import System.Environment (getArgs)
-import Data.Functor.Identity
-import Data.Either
-import Data.Set (Set)
-import qualified Data.Set as Set
-import Debug.Trace
 
-import Basic
-import Types
-import Parser (program)
-import ParserCombinator (assertParse, lexComments)
-import MMap (MMap)
-import qualified MMap as M
-import qualified Derp.Core as D
-import Derp.Parse
-import qualified Derp.Gen as GD
 import Server (runServer)
-import Compile
-import CatShelf
+import DrawDiagram.Main (runDrawDiagram)
+import TestPipeline (runTestPipeline)
 
+main :: IO ()
 main = do
   args <- getArgs
-  let filename = case args of
-        (f:_) -> f
-        []    -> error "usage: rats <file.turn>"
-      base = fromMaybe filename (stripSuffix ".turn" filename)
-  --runTest base
-  runServer base
+  case args of
+    ("serve" : rest) -> do
+      let filename = case rest of
+            (f:_) -> f
+            []    -> error "usage: rats serve <file.turn>"
+          base = fromMaybe filename (stripSuffix ".turn" filename)
+      runServer base
+    ("draw-diagram" : _) -> runDrawDiagram
+    ("test-pipeline" : rest) -> do
+      let base = case rest of
+            (f:_) -> f
+            []    -> error "usage: rats test-pipeline <base>"
+      runTestPipeline base
+    _ -> error "usage: rats <serve|draw-diagram|test-pipeline> ..."
 
 stripSuffix :: String -> String -> Maybe String
 stripSuffix suffix s

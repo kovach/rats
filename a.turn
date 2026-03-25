@@ -8,12 +8,13 @@
 
 ?a X | !c.
 
+exit
+
 (?act ~ ?it dreams) / (
   (!gain ~ !type major / (?forgot F))
   | (!play ~ !it F)
 ).
 
-exit
 
 (?act ~ ?it dreams) / (
   (!gain ~ !type major / (?forgot F))

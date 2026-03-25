@@ -34,13 +34,13 @@ rustBinary :: FilePath
 rustBinary = "rust-derp/target/release/derp"
 
 runRustDerp :: String -> IO String
-runRustDerp base = readProcess rustBinary [base ++ ".derp"] ""
+runRustDerp base = readProcess rustBinary [base ++ ".gen.derp"] ""
 
 compileAndRun :: String -> IO ()
 compileAndRun base = do
   _ <- main1 base
   _ <- runRustDerp base
-  let outDerp = base ++ ".out.derp"
+  let outDerp = base ++ ".gen.out.derp"
   putStrLn $ "parsing " ++ outDerp ++ "..."
   derpOutput <- readFile outDerp
   let rules = DP.parse derpOutput

@@ -41,9 +41,16 @@
     #dark-toggle:hover, #help-btn:hover { border-color: white; color: white; }
     #main { display: flex; flex: 1; overflow: hidden; }
     #left { display: flex; flex-direction: column; width: 40%; border-right: 2px solid var(--border); }
-    #editor { flex: 1; width: 100%; resize: none; font-family: monospace; font-size: 12px;
+    #editor-wrap { flex: 1; position: relative; overflow: hidden; }
+    #editor { width: 100%; height: 100%; resize: none; font-family: monospace; font-size: 12px;
               border: none; padding: 12px; outline: none; line-height: 1.6;
-              background: var(--bg); color: var(--text); }
+              background: transparent; color: var(--text); position: relative; z-index: 1; }
+    #editor-highlight { position: absolute; inset: 0; pointer-events: none; overflow: hidden;
+              white-space: pre-wrap; word-wrap: break-word;
+              font-family: monospace; font-size: 12px; padding: 12px; line-height: 1.6;
+              color: transparent; background: var(--bg); }
+    .parse-error-mark { background: rgba(220, 38, 38, 0.25); border-radius: 2px;
+              text-decoration: underline wavy #dc2626; text-decoration-thickness: 2px; }
     .btn-row { display: flex; flex-shrink: 0; background: var(--bg); }
     #run-btn, #run-ref-btn { flex: 1; padding: 10px; color: white; border: none;
                cursor: pointer; font-size: 13px; font-family: monospace; }
@@ -84,8 +91,11 @@
   <header><span>DERP: deriving predicates</span><div style="display:flex;gap:8px"><button id="help-btn">help</button><button id="dark-toggle">light</button></div></header>
   <div id="main">
     <div id="left">
-      <textarea id="editor" spellcheck="false">
+      <div id="editor-wrap">
+        <div id="editor-highlight" aria-hidden="true"></div>
+        <textarea id="editor" spellcheck="false">
 </textarea>
+      </div>
       <div class="btn-row">
         <button id="run-btn">&#9654; Run</button>
         <button id="run-ref-btn">&#9654; Run (ref)</button>
@@ -99,6 +109,32 @@ import { parseRules, prettyAtom } from './parse-rule.js';
 import { compileDerivatives, makeHelpers, makeCompiledRefEvalFn, makeNegOnlyFn } from './eval-fn.js';
 import { solveWithLog, solveRefWithLog } from './eval.js';
 import { tupleKey } from './util.js';
+
+// ── error highlight ───────────────────────────────────────────────────────────
+
+function posToOffset(text, line, col) {
+  const lines = text.split('\n');
+  let offset = 0;
+  for (let i = 0; i < line - 1 && i < lines.length; i++)
+    offset += lines[i].length + 1;
+  return offset + col - 1;
+}
+
+function escHtml(s) {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function updateErrorHighlight(text, errorRange) {
+  return;
+  const hl = document.getElementById('editor-highlight');
+  if (!errorRange) { hl.textContent = ''; return; }
+  const s = posToOffset(text, errorRange.start.line, errorRange.start.col);
+  const e = posToOffset(text, errorRange.end.line, errorRange.end.col) + 1;
+  hl.innerHTML = escHtml(text.slice(0, s))
+    + `<span class="parse-error-mark">${escHtml(text.slice(s, e))}</span>`
+    + escHtml(text.slice(e));
+  hl.scrollTop = document.getElementById('editor').scrollTop;
+}
 
 // ── config ────────────────────────────────────────────────────────────────────
 const DB_FOLD_THRESHOLD = 10;    // collapse a relation if it has this many or more tuples
@@ -207,6 +243,7 @@ function runRef() {
   const output = document.getElementById('right');
   try {
     const allRules = parseRules(text);
+    updateErrorHighlight(text, null);
     save();
     const facts = allRules.filter(r => r.body.length === 0).flatMap(r => r.head);
     const rules = allRules.filter(r => r.body.length > 0);
@@ -220,6 +257,7 @@ function runRef() {
       ${renderDb(result, { open: true })}
     </div>` + renderRefLog(log);
   } catch (e) {
+    updateErrorHighlight(text, e.range || null);
     output.innerHTML = `<div class="error">Error: ${e.message}</div>`;
   }
 }
@@ -229,6 +267,7 @@ function run() {
   const output = document.getElementById('right');
   try {
     const allRules = parseRules(text);
+    updateErrorHighlight(text, null);
     save();
     const facts = allRules.filter(r => r.body.length === 0).flatMap(r => r.head);
     const rules = allRules.filter(r => r.body.length > 0);
@@ -242,6 +281,7 @@ function run() {
       ${renderDb(result, { open: true })}
     </div>` + renderLog(log);
   } catch (e) {
+    updateErrorHighlight(text, e.range || null);
     output.innerHTML = `<div class="error">Error: ${e.message}</div>`;
   }
 }
@@ -299,6 +339,10 @@ document.getElementById('editor').addEventListener('keydown', e => {
     document.execCommand('insertText', false, '');
     ta.selectionStart = ta.selectionEnd = deleteStart;
   }
+});
+
+document.getElementById('editor').addEventListener('scroll', () => {
+  document.getElementById('editor-highlight').scrollTop = document.getElementById('editor').scrollTop;
 });
 
 document.getElementById('run-btn').addEventListener('click', run);
@@ -367,11 +411,14 @@ darkToggle.addEventListener('click', () => {
 const hash = location.hash.startsWith('#code/') ? location.hash.slice(6) : null;
 const initialEditorValue = hash
   ? LZString.decompressFromBase64(hash)
-  : DEFAULT_PROGRAM + HELP_TEXT;
+  : DEFAULT_PROGRAM;
 document.getElementById('editor').value = initialEditorValue;
 
 run();
 document.getElementById('editor').focus();
+
+if (!hash) document.execCommand('insertText', false, '\n\n' + HELP_TEXT);
+
 </script>
 </body>
 </html>

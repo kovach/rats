@@ -107,7 +107,7 @@ function step(direction, changes, unifyNeg, unifyPos, solve, D, maxInner, trace 
     let matches = dir == 'neg' ? unifyNeg(tuple) : unifyPos(tuple);
 
     const derivations = matches.flatMap(({ bindings, remainingBody, head }) =>
-      solve(remainingBody,bindings, D).flatMap((sol) =>
+      solve(remainingBody, bindings, D).flatMap((sol) =>
         head.map((h) => applyBindings(h, sol))));
 
     // Both of these lines have the same effect: solve may now see the current value of tuple
@@ -141,6 +141,7 @@ function step(direction, changes, unifyNeg, unifyPos, solve, D, maxInner, trace 
   }
   return { result: [...result], cutoff: false };
 }
+
 
 // Compute the well-founded semantics of a program.
 // Returns: { log, result, cutoff }

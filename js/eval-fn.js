@@ -41,7 +41,6 @@ function unify(pattern, value, bindings = {}) {
   return b;
 }
 
-
 // Find all binding extensions satisfying `literals` against D.
 // Positive literals use posVisible(D, key); negative use negVisible(D, key).
 function solve(literals, bindings, D) {

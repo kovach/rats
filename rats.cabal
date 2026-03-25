@@ -57,7 +57,7 @@ executable rats
     -- Import common warning flags.
     import:           warnings
 
-    default-extensions: PatternSynonyms, FunctionalDependencies, GeneralizedNewtypeDeriving
+    default-extensions: PatternSynonyms, FunctionalDependencies, GeneralizedNewtypeDeriving, OverloadedStrings
 
     -- .hs or .lhs file containing the Main module.
     main-is:          Main.hs

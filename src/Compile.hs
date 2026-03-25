@@ -233,6 +233,7 @@ check (SameIsh a b) = do
   I bl br <- check b
   tell [al `Lt` bl, ar `Eql` br]
   pure $ I al ar
+check (Shelf _) = error "todo"
 check (Instead{}) = error "unreachable. Instead is pre-processed."
 
 checkAll :: E -> [Constraint]

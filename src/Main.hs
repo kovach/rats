@@ -1,13 +1,15 @@
 module Main where
 
-import Data.List (isSuffixOf)
-import qualified Data.List
+import Prelude hiding (Word, lex)
+import Data.List
 import Data.Maybe (fromMaybe)
 import System.Environment (getArgs)
 
 import Server (runServer)
 import DrawDiagram.Main (runDrawDiagram)
 import TestPipeline (runTestPipeline)
+import CatShelf (runCatShelf)
+import CatShelf
 
 main :: IO ()
 main = do
@@ -21,10 +23,17 @@ main = do
       runServer base
     ("draw-diagram" : _) -> runDrawDiagram
     ("test-pipeline" : rest) -> do
-      let base = case rest of
+      let filename = case rest of
             (f:_) -> f
             []    -> error "usage: rats test-pipeline <base>"
+          base = fromMaybe filename (stripSuffix ".turn" filename)
       runTestPipeline base
+    ("ooops" : rest) -> do
+      let filename = case rest of
+            (f:_) -> f
+            []    -> error "usage: rats ooops <base>"
+          base = fromMaybe filename (stripSuffix ".turn" filename)
+      runCatShelf base
     _ -> error "usage: rats <serve|draw-diagram|test-pipeline> ..."
 
 stripSuffix :: String -> String -> Maybe String

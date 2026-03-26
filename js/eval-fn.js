@@ -107,44 +107,10 @@ function compileDerivatives(rules) {
       const triggerArity = lits[0].atom.args.length;
 
       for (const subset of nonEmptySubsets(lits)) {
-        const triggerBindings = {};
-        const eqConstraints  = [];
-        const valConstraints = [];
-        let consistent = true;
-
-        for (const lit of subset) {
-          for (let i = 0; i < lit.atom.args.length; i++) {
-            const term = lit.atom.args[i];
-            if (term.tag === 'hole') continue;
-            if (term.tag === 'var') {
-              if (term.name in triggerBindings) {
-                const j = triggerBindings[term.name];
-                if (i !== j) eqConstraints.push([i, j]);
-              } else {
-                triggerBindings[term.name] = i;
-              }
-            } else if (term.tag === 'sym') {
-              const existing = valConstraints.find(([pi]) => pi === i);
-              if (existing) {
-                if (existing[1].name !== term.name) { consistent = false; break; }
-              } else {
-                valConstraints.push([i, term]);
-              }
-            } else {
-              consistent = false; break;
-            }
-          }
-          if (!consistent) break;
-        }
-
-        if (!consistent) continue;
-
         compiled.push({
           triggerName,
           triggerArity,
-          eqConstraints,
-          valConstraints,
-          triggerBindings,
+          subsetPatterns: subset.map(lit => lit.atom.args),
           remainingBody: rule.body.filter(lit => !subset.includes(lit)),
           head: rule.head,
         });
@@ -180,11 +146,16 @@ function makeHelpers(derivatives, rules) {
     const matches = [];
     for (const cd of derivatives) {
       if (cd.triggerName !== t.name || cd.triggerArity !== t.args.length) continue;
-      if (!cd.eqConstraints.every(([i, j]) => deepEqual(t.args[i], t.args[j]))) continue;
-      if (!cd.valConstraints.every(([i, sym]) => deepEqual(t.args[i], sym))) continue;
-      const bindings = Object.fromEntries(
-        Object.entries(cd.triggerBindings).map(([v, i]) => [v, t.args[i]])
-      );
+      let bindings = {};
+      let ok = true;
+      for (const patternArgs of cd.subsetPatterns) {
+        for (let i = 0; i < patternArgs.length; i++) {
+          bindings = unify(patternArgs[i], t.args[i], bindings);
+          if (bindings === null) { ok = false; break; }
+        }
+        if (!ok) break;
+      }
+      if (!ok) continue;
       matches.push({ bindings, remainingBody: cd.remainingBody, head: cd.head });
     }
     return matches;

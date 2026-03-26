@@ -12,7 +12,7 @@ if (!filePath) { console.error('Usage: node run.js [--ref|--parse] <file.derp>')
 const text = readFileSync(filePath, 'utf8');
 
 if (parseOnly) {
-  console.log(JSON.stringify(parseRulesWithRanges(text), null, 2));
+  console.log(JSON.stringify(parseRules(text), null, 2));
   process.exit(0);
 }
 

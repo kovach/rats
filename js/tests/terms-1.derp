@@ -1,0 +1,2 @@
+foo p(3).
+foo p(A) -- bar p(A).

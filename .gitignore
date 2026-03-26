@@ -1,20 +1,24 @@
-dist-newstyle/
-out.cpp
+# misc
+tmp*
 junk*
 rats.aux
 rats.hp
 rats.prof
 rats.ps
 *perf.data*
-*.out.derp
-tmp*
-diagrams/*.svg
-diagrams/*.pdf
+# haskell/rust build
+dist-newstyle/
 rust-derp/target/
 target/
-*elab*
+# generated data
+diagrams/*.svg
+diagrams/*.pdf
 flamegraph*
 out.*
 **/data/*.json
 /*.json
-/*.derp
+*.out.derp
+# generated programs files
+*.elab.*
+*.gen.*
+turn-src/*.derp

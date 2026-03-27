@@ -628,19 +628,9 @@ main2' input = do
   pure out'
 
 main2 = do
-  --input <- readFile "test.derp"
   input <- readFile "layout.derp"
   main2' input
 
 main3 = do
   str <- main1 "ttt"
   main2' str
-
--- runTest base = do
---   (result, _, rules) <- genDerp base
---   writeFile "tmp.derp" result
---   putStrLn rules
-
--- TODO
--- error handling
--- debug/info log

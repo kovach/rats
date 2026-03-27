@@ -1,4 +1,22 @@
+-- Possible alternate names for this:
+--    OOOPS = out-of-order predicate syntax
+--    FLOPS = flexible-order ...
+--    cat shelf = "cat on shelf"
 module CatShelf where
+
+-- High level idea:
+-- logical form: cat(X)
+-- natural sentential form: X (is) cat
+--
+-- "a cat is on a shelf"
+-- cat(X), shelf(Y), on(X,Y)
+-- (a) cat (is) on (a) shelf
+-- insert (Var , Var) in between any pair where one is unary:
+--   (a) cat [X , X] (is) on [Y , Y] (a) shelf
+-- remove signaling words:
+--   cat X, X on Y, Y shelf
+-- standard form:
+--   cat X, on X Y, shelf Y
 
 import Prelude hiding (Word, lex)
 import Control.Monad.State
@@ -19,10 +37,9 @@ pwrap x = "(" <> x <> ")"
 
 data Ty = Ty String
   deriving (Eq, Show, Ord)
---data Tuple = Tuple String [Literal]
 type Arity = [Ty]
 type Schema = Pred -> [Arity]
-data Term a = Term a | TermVar Var | TermPred Pred
+data Term a = Term a
   deriving (Eq, Show, Ord)
 data Atom a = Atom Pred [Term a]
   deriving (Eq, Ord, Show)
@@ -31,29 +48,32 @@ data Atom a = Atom Pred [Term a]
 data Word a = WTerm (Term a) | WPred Pred | WPush | WPop | WHole
   deriving (Eq, Show, Ord)
 
-data Temp a
+-- Item?
+data Item a
   -- a partially applied atom with `Arity` missing arguments.
-  = TempAtom [Term a] Arity Ty
-  | TempHole
-  | Temps [Temp a]
-  | TempPush | TempPop
+  = ItemAtom (Stack (Item a)) [Term a] Arity Ty
+  | ItemHole
+  | Items [Item a]
+  | ItemPush | ItemPop
   deriving (Eq)
 
-instance IsString (Term a) where
-  fromString = TermPred
+instance OfItem a => IsString (Term a) where
+  fromString = Term . mkPred
 
 -- lexicon
 _t = Ty "term"
 _te = Ty "turn-expr"
-_join op = TempAtom [op] [_te, _te] _te
-_comma = _join ","
-_var v = TempAtom [v] [] _t
+_join op = ItemAtom [] [Term op] [_te, _te] _te
+_comma :: OfItem a => Item a
+_comma = _join (mkPred ",")
+_var v = ItemAtom [] [Term v] [] _t
 
 predArity :: String -> Arity
 predArity = (flip replicate _t) . (+1) . length . filter (== '/')
 
 holeSymbol = "."
-hole = TermVar holeSymbol
+hole :: OfItem a => a
+hole = mkVar holeSymbol
 
 split delim s = (takeWhile (/= delim) s, drop 1 $ dropWhile (/= delim) s)
 
@@ -65,15 +85,13 @@ parseLit s =
 sh :: Show a => [a] -> String
 sh = unwords . map show
 
-instance Show a => Show (Temp a) where
-  -- show (TempTerm v) = show v
-  show (TempHole) = holeSymbol
-  show (TempAtom vs ar a) = pwrap $ (sh vs) <> "/" <> (sh ar) <> ":" <> show a
-  show (Temps ts) = "[" <> intercalate " | " (map show ts) <> "]"
-  show TempPush = "push"
-  show TempPop = "pop"
-
-type M b a = ExceptT String (WriterT [Atom b] (StateT Int [])) a
+instance Show a => Show (Item a) where
+  -- show (ItemTerm v) = show v
+  show (ItemHole) = holeSymbol
+  show (ItemAtom _todo vs ar a) = pwrap $ (sh vs) <> "/" <> (sh ar) <> ":" <> show a
+  show (Items ts) = "[" <> intercalate " | " (map show ts) <> "]"
+  show ItemPush = "push"
+  show ItemPop = "pop"
 
 fresh' :: (MonadState Int m) => m Var
 fresh' = do
@@ -88,73 +106,96 @@ fresh str = do
 
 -- reverse, but also deal with holes
 -- each hole rotates the topmost parameter to the end
-fixVars :: Eq a => [Term a] -> [Term a]
-fixVars x = fix x'
-  where
-    x' = reverse x
+-- fixVars :: Eq a => [Term a] -> [Term a]
+-- fixVars x = fix x'
+--   where
+--     x' = reverse x
+--
+--     -- this is not obviously correct (or is it incorrect?)
+--     fix [] = []
+--     fix (h : vs) | h == hole = rotate (fix vs)
+--     fix (v : vs) = v : fix vs
+--
+--     rotate [] = []
+--     rotate z = last z : init z
 
-    -- this is not obviously correct (or is it incorrect?)
-    fix [] = []
-    fix (h : vs) | h == hole = rotate (fix vs)
-    fix (v : vs) = v : fix vs
-
-    rotate [] = []
-    rotate z = last z : init z
+class OfItem a where
+  finish :: [Term a] -> Ty -> a
+  mkVar :: Var -> a
+  mkPred :: Pred -> a
 
 type Stack a = [a]
 
 -- Parse state. left side: progress, right side: input sentence.
-type St a = (Stack (Temp a), Stack (Temp a))
+type St a = (Stack (Item a), Stack (Item a))
 data St' a = StNil { stVal :: St a } | St { stVal :: St a, stTail :: (St' a) }
   deriving (Eq, Show)
 
-class OfTempAtom a where
-  finish :: [Term a] -> Ty -> a
+type M b a = ExceptT String (WriterT [Atom b] (StateT Int [])) a
 
-step :: (OfTempAtom a, Eq a, Show a) => St a -> M a (St a)
+finish' [] args ty = pure $ finish args ty
+finish' ctxt args ty = completeParse (ctxt, [ItemAtom [] args [] ty])
+
+step :: (OfItem a, Eq a, Show a) => St a -> M a (St a)
 
 -- [nondeterminism in lexicon]
 --   We handle words that have multiple possible arities here.
-step (l, Temps ts : r) = do
+step (l, Items ts : r) = do
   t <- lift $ lift $ lift $ ts
   pure (l, t : r)
 
 -- Introduce join
-step (lt@(TempAtom _ [ty] _ : _), rt@(TempAtom _ (ty':_) _ : _)) | ty == ty' =
-  do
-    v <- TermVar <$> fresh'
-    pure (lt, _var v : _comma : _var v : rt)
--- swap and apply the first case
-step (x1@(TempAtom _ (ty':_) _) : l, x2@(TempAtom _ [ty] _) : r) | ty == ty' = pure (x2 : l, x1 : r)
+step (lt@(ItemAtom _ _ [ty] _ : _), rt@(ItemAtom _ _ (ty':_) _ : _)) | ty == ty' = do
+  v <- mkVar <$> fresh'
+  pure (lt, _var v : _comma : _var v : rt)
+step (lt@(ItemAtom _ _ (ty':_) _) : l, rt@(ItemAtom _ _ [ty] _) : r) | ty == ty' = do
+  v <- mkVar <$> fresh'
+  pure (rt : l, _var v : _comma : _var v : lt : r)
+  -- pure (x2 : l, x1 : r)
 
 -- Apply to term
-step ((TempAtom args [] ty : l), (TempAtom bound (ty':minusOne) outTy : r)) | ty == ty' =
-  pure (l, TempAtom (bound <> [Term $ finish args ty]) minusOne outTy : r)
-step (x1@(TempAtom _ (ty':_) _) : l,  x2@(TempAtom _ [] ty) : r) | ty == ty' =
-  step (x2 : l, x1 : r)
+step ((ItemAtom termCtxt args [] ty : l), (ItemAtom otherCtxt bound (ty':minusOne) outTy : r)) | ty == ty' = do
+  t <- finish' termCtxt args ty
+  pure (l, ItemAtom otherCtxt (bound <> [Term $ t]) minusOne outTy : r)
+step (ItemAtom otherCtxt bound (ty':minusOne) outTy : l, (ItemAtom termCtxt args [] ty : r)) | ty == ty' = do
+  t <- finish' termCtxt args ty
+  pure (l, ItemAtom otherCtxt (bound <> [Term $ t]) minusOne outTy : r)
+  -- step (x2 : l, x1 : r)
 
---step (TempAtom p vs a : l,  TempHole : r) =
---  pure (l, TempAtom p (hole : vs) a : r)
---step (TempHole : l, TempAtom p vs a : r) =
---  pure (l, TempAtom p (hole : vs) a : r)
+--step (ItemAtom p vs a : l,  ItemHole : r) =
+--  pure (l, ItemAtom p (hole : vs) a : r)
+--step (ItemHole : l, ItemAtom p vs a : r) =
+--  pure (l, ItemAtom p (hole : vs) a : r)
 
 -- [paren handling]
-step (l, TempPush : r) = pure (TempPush : l, r)
-step (x : TempPush : l, TempPop : r) = pure (l, x : r)
-step s@(_, TempPop : _) = throwError $ "mismatched ')':\n" <> show s
+step (l, ItemPush : r)               = pure (ItemPush : l, r)
+step (l, ItemPop : r) = do
+  case doPop l of
+    Just ([x], l') -> pure (l', x : r)
+    Just (ItemAtom [] args arity ty:xs, l') -> pure (l',  ItemAtom xs args arity ty : r)
+    Just (_bad:_xs, _l') -> throwError $ "todo: " <> show _bad
+    Just ([], _) -> throwError "empty parens"
+    Nothing -> throwError $ "mismatched ')':\n" <> show l
+-- step (x : ItemPush : l, ItemPop : r) = pure (l, x : r)
+-- step s@(_, ItemPop : _)              = throwError $ "mismatched ')':\n" <> show s
 
 -- [push step]
 --   Otherwise, push the next word to the stack
-step (l, w@(TempAtom {}) : r) = pure (w : l, r)
-step (l, w@(TempHole {}) : r) = pure (w : l, r)
+step (l, w@(ItemAtom {}) : r) = pure (w : l, r)
+step (l, w@(ItemHole {}) : r) = pure (w : l, r)
 
 -- [done]
 step (s, []) = pure (s, [])
 
+doPop l =
+  let (xs, r) = span (/= ItemPush) l
+   in case r of
+        ItemPush : rest -> Just (xs, rest)
+        _ -> Nothing
+
 step' st = do
   a' <- step (stVal st)
   pure $ St a' st
-
 
 wrap :: (Eq a, Monad m) => (a -> m a) -> a -> m (Maybe a)
 wrap f x = do
@@ -170,24 +211,33 @@ data ParseResult a b
 defaultSchema :: Schema
 defaultSchema = \s -> [predArity s]
 
-run1'' :: (Eq a, Show a, OfTempAtom a) => [Temp a] -> [Either String [St' a]]
+steps :: (OfItem a, Eq a, Show a) => St a -> M a [St a]
+steps = iter $ wrap step
+
+completeParse s = do
+  s' <- steps s
+  case last s' of
+    ([ItemAtom ctxt args [] ty], []) -> finish' ctxt args ty
+    fin -> throwError $ "todo2: " <> show fin
+
+run1'' :: (Eq a, Show a, OfItem a) => [Item a] -> [Either String [St' a]]
 run1'' ws = map (fst . fst) $ flip runStateT 0 $ runWriterT $ runExceptT $ do
     out <- iter' 80 (wrap step') (StNil ([], ws))
     pure out
 
-run1' :: (Eq a, Show a, OfTempAtom a) => [Temp a] -> [Either String [St a]]
+run1' :: (Eq a, Show a, OfItem a) => [Item a] -> [Either String [St a]]
 run1' ws = map (fst . fst) $ flip runStateT 0 $ runWriterT $ runExceptT $ do
     out <- iter' 80 (wrap step) ([], ws)
     pure out
 
-run1 :: (Eq a, Show a, OfTempAtom a) => [Temp a] -> [ParseResult a a]
+run1 :: (Eq a, Show a, OfItem a) => [Item a] -> [ParseResult a a]
 run1 ws = map (check) $ flip runStateT 0 $ runWriterT $ runExceptT $ do
     out <- iter (wrap step) ([], ws)
     let out' = last out
     case out' of
       ([], []) -> pure Nothing
       --([t], []) -> pure $ Just t
-      ([TempAtom args [] ty], []) -> pure $ Just $ finish args ty
+      ([ItemAtom ctxt args [] ty], []) -> Just <$> finish' ctxt args ty
       _ -> throwError $ "bad parse. temp term remaining: " <> show out'
   where
     check ((Left err, atoms), _) = Error err atoms
@@ -216,25 +266,24 @@ iter f v = do
 run2 :: String -> [ParseResult E E]
 run2 = run1 . map (tokenize defaultSchema) . lex
 
+run3 f =
+  case run2 f of
+    Success1 _ t : _ -> putStrLn $ pwrap f <> " ok: " <> show t
+    Error str _ : _ -> do
+      let msg = "failed: " <> f <> "\n" <> str
+      putStrLn msg
+    _ -> error "todo"
+
 runCatShelf base = do
   f <- readFile (base <> ".turn")
-  case run2 f of
-    Success1 _ t : _ -> print t
-    Error str _ : _ -> putStrLn str
-    _ -> error "todo"
+  run3 f
 
 data JoinOp = Binary String String | Fixed String
   deriving (Eq, Show)
 
-data E
-  = Leaf [E] -- e's must be t's
-  | Join JoinOp E E
-  | TVar Var
-  | TPred Pred
-  deriving (Eq, Show)
-
 specialTokens =
-  [ "("
+  [ "."
+  , "("
   , ")"
   , "<="
   , ","
@@ -249,15 +298,34 @@ toJoinOp = \case
   [a,b] | isEndpointJoin a b -> Just $ Binary [a] [b]
   _ -> Nothing
 
-efix (TermVar v) = TVar v
-efix (TermPred p) = TPred p
-efix (Term t) = t
+--efix (TermVar v) = TVar' v
+--efix (TermPred p) = TPred' p
+efix (Term a) = a
+--efix (Term (TVar v)) = TVar' v
+--efix (Term (TPred v)) = TPred' v
+--efix e = error $ show e
+--efix (Term t) = t
 
-instance OfTempAtom E where
-  finish [TermPred pr, (Term x), (Term y)] ty | ty == _te, Just op <- toJoinOp pr = Join op x y
-  finish (TermPred p : ts) ty | ty == _te = Leaf (TPred p : map efix ts)
-  finish [TermVar v] ty | ty == _t = TVar v
+-- data T
+--   = TVar' Var
+--   | TPred' Pred
+--   deriving (Eq, Show)
+
+data E
+  = Leaf [E] -- e's must be t's
+  | Join JoinOp E E
+  | TVar Var
+  | TPred Pred
+  deriving (Eq, Show)
+
+instance OfItem E where
+  finish [Term (TPred p), (Term x), (Term y)] ty | ty == _te, Just op <- toJoinOp p = Join op x y
+  finish (Term (TPred p) : ts) ty | ty == _te = Leaf (TPred p : map efix ts)
+  finish [Term (TVar v)] ty | ty == _t = TVar v
+  --finish [TermVar v] ty | ty == _t = TVar v
   finish ts _ = error $ show ts
+  mkVar v = TVar v
+  mkPred p = TPred p
 
 data Token = Token String
   deriving (Eq, Ord, Show)
@@ -280,14 +348,14 @@ pickOne "" = Nothing
 pickOne s = let (t, r) = break isSpace s in Just (Token t, drop 1 r)
 lex s = pickToken s
 
-tokenize :: Schema -> Token -> Temp a
-tokenize _s (Token "(") = TempPush
-tokenize _s (Token ")") = TempPop
-tokenize _s (Token "_") = TempHole
-tokenize _s (Token pr) | Just _ <- toJoinOp pr = _join $ TermPred pr
-tokenize _s (Token s@(x : _)) | isUpper x = _var $ TermVar s
-tokenize _s (Token s@('_' : _))           = _var $ TermVar s
-tokenize  s (Token p@(_ : _)) = Temps [ TempAtom [TermPred p] ar _te | ar <- s p ]
+tokenize :: OfItem a => Schema -> Token -> Item a
+tokenize _s (Token "(") = ItemPush
+tokenize _s (Token ")") = ItemPop
+tokenize _s (Token "_") = ItemHole
+tokenize _s (Token pr) | Just _ <- toJoinOp pr = _join $ mkPred pr
+tokenize _s (Token s@(x : _)) | isUpper x = _var $ mkVar s
+tokenize _s (Token s@('_' : _))           = _var $ mkVar s
+tokenize  s (Token p@(_ : _)) = Items [ ItemAtom [] [Term $ mkPred p] ar _te | ar <- s p ]
 tokenize _s (Token []) = error "empty word"
 
 eg1 = "cat on shelf"
@@ -307,15 +375,16 @@ conf1  = "on on cat cat"  -- a cat is on something that is on a cat
 conf1' = "on cat on cat" -- a cat is on something that is on a cat
 conf2  = "X Y on" -- Y is on X
 
-chk x =
-  case run2 x of
-    [Error e _] -> putStrLn e
-    v -> print v
-tests =
-  []
-  -- [eg1, eg1', eg2, eg3, eg5, eg6, eg6', eg7, bad1, bad2, conf1, conf1', conf2]
-  <> ["(cat on) cat"]
-
 printParseResult (Error e _) = putStrLn $ e <> "\n"
 printParseResult (Success0 q) = putStrLn $ unlines (map show q)
 printParseResult (Success1 q t) = putStrLn $ show t <> "\n" <> unlines (map show q)
+
+tests =
+  [ "x/y x y"
+  , "x x/y y"
+  , "(x/y x) y"
+  , "x (y y/x)"
+  , "x (z/x/y z) y"
+  ]
+
+chk = mapM_ run3 tests

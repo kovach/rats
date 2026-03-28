@@ -20,5 +20,5 @@ out.*
 *.out.derp
 # generated programs files
 *.elab.*
-*.gen.*
+# *.gen.*
 turn-src/*.derp

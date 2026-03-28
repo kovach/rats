@@ -50,9 +50,6 @@ data Term = TermPred Pred
 data Op = OpLt
         | OpEq
   deriving (Show, Eq, Ord)
-opIneq = \case
-  OpLt -> True
-  OpEq -> False
 data AtomType
   = AtomFree
   | AtomPos
@@ -60,18 +57,9 @@ data AtomType
   | AtomNeg
   deriving (Show, Eq, Ord)
 
-data PredToken = PredToken AtomType Pred
+data PVar = PVar { pvar :: Maybe Var, pname :: Maybe Name }
   deriving (Show, Eq, Ord)
-data Token = PT PredToken | PTerm Term
-  deriving (Show, Eq, Ord)
-
-data PVar
-  = PVar { pvar :: Maybe Var
          -- , pdeps :: Maybe [Var]
-         , pname :: Maybe Name }
-  deriving (Show, Eq, Ord)
-
-noPVar = PVar Nothing Nothing
 
 pattern NoVars = PVar Nothing Nothing
 pattern AllVars a c = PVar (Just a) (Just c)
@@ -84,7 +72,6 @@ pattern PPI p s i ts <- Pattern s (PVar (Just i) _) (TermPred p : ts)
 pattern PPP p a b ts = Pattern a b (TermPred p : ts)
 
 data E = Atom Pattern
-       | Shelf [Token]
        | EVar Term
        | After E
        | And E E
@@ -129,6 +116,12 @@ data Rule = Rule { body :: Set Constraint, head :: Set Constraint }
 type Ms b c a = (State (MMap b c)) a
 type M a = Ms String (Sum Int) a
 type MonadFreshVarState m = MonadState (MMap String (Sum Int)) m
+
+noPVar = PVar Nothing Nothing
+
+opIneq = \case
+  OpLt -> True
+  OpEq -> False
 
 isPositive AtomPos = True
 isPositive AtomFree = False
@@ -205,11 +198,6 @@ instance PP Constraint where
 instance PP Op where
   pp OpLt = "<"
   pp OpEq = "="
-instance PP PredToken where
-  pp (PredToken s x) = pp s <> pp x
-instance PP Token where
-  pp (PT x) = pp x
-  pp (PTerm x) = pp x
 instance PP E where
   pp (Atom p) = pp p
   pp (After e) = "#" <> pp e
@@ -224,7 +212,6 @@ instance PP E where
   pp (SameIsh a b) = pwrap $ pp a <> " ~> " <> pp b
   pp (Instead a b) = pwrap $ pp a <> " -> " <> pp b
   pp (SameNot a b) = pwrap $ pp a <> " ~¬ " <> pp b
-  pp (Shelf ts) = pwrap $ unwords $ map pp ts
 instance PP TRule where
   pp (TRule n e) = n <> ": " <> pp e <> "."
 
@@ -237,7 +224,6 @@ eTraverse f = go
     go e@(Atom _) = f e
     go e@(EVar _) = f e
     go e@(Instead _ _) = f e -- TODO
-    go e@(Shelf _) = f e
     go (After e) = (After <$> go e)
     go (And a b) = And <$> (go a) <*> (go b)
     go (Seq a b) = Seq <$> (go a) <*> (go b)

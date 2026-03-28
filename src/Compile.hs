@@ -3,7 +3,7 @@
 {-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE ConstraintKinds #-}
-module Compile (main1, main2, main3) where
+module Compile (main1, main2, main3, main4, main5) where
 
 import Prelude hiding (pred, exp, take)
 import Control.Monad.Writer
@@ -21,6 +21,7 @@ import qualified Data.Set as Set
 import Debug.Trace
 import System.Process
 import System.Directory (createDirectoryIfMissing)
+import Data.Char
 
 import Basic
 import Types
@@ -31,6 +32,8 @@ import qualified MMap as M
 import qualified Derp.Core as D
 import qualified Derp.Parse as DP
 import qualified Derp.Gen as GD
+import CatShelf hiding (parse, Term, Pred, Var, fresh)
+import qualified CatShelf as CS
 
 data VarScope = VS (Set Var) (Set Var)
   deriving (Eq, Show)
@@ -137,12 +140,6 @@ exceptionPredicates = nub . execWriter . eTraverse' go
     go (Instead (PP l _) r) = tell [(l,r)]
     go _ = pure ()
 
-tokenParse :: E -> E
-tokenParse = eMap go
-  where
-    go (Shelf ts) = error "todo"
-    go x = x
-
 elab' (TRule r e) = do
   -- mark existential variables,
   -- fresh names on choice vars,
@@ -233,7 +230,6 @@ check (SameIsh a b) = do
   I bl br <- check b
   tell [al `Lt` bl, ar `Eql` br]
   pure $ I al ar
-check (Shelf _) = error "todo"
 check (Instead{}) = error "unreachable. Instead is pre-processed."
 
 checkAll :: E -> [Constraint]
@@ -592,9 +588,7 @@ mkFile path p = do
 --     byName (RuleStatement (Just n) _) | n == name = True
 --     byName _ = False
 
-genDerp base = do
-  pr0 <- readFile (base ++ ".turn")
-  let ttt = TP.parse pr0
+genDerp ttt = do
   let name _ r@(RuleStatement (Just _) _) = r
       name n (RuleStatement Nothing r) = RuleStatement (Just n) r
       name _ x = x
@@ -604,9 +598,21 @@ genDerp base = do
   let result = prelude <> crResult
   pure (result, crElab, crResult)
 
+writeGenDerp base stmts = do
+  (result, elabText, ruleText) <- genDerp stmts
+  putStrLn $ "generated derp:\n" <> ruleText
+  let outFile = base <> ".gen.derp"
+  writeFile outFile result
+  writeFile (base ++ ".elab.turn") elabText
+  putStrLn $ "wrote file " <> outFile
+  pure result
+
+
 main1 :: String -> IO String
 main1 base = do
-  (result, elabText, ruleText) <- genDerp base
+  pr0 <- readFile (base ++ ".turn")
+  let ttt = TP.parse pr0
+  (result, elabText, ruleText) <- genDerp ttt
   putStrLn $ "generated derp:\n" <> ruleText
   let outFile = base <> ".gen.derp"
   writeFile outFile result
@@ -634,3 +640,97 @@ main2 = do
 main3 = do
   str <- main1 "ttt"
   main2' str
+
+-- Parsing Stuff --
+-- TODO move this
+startSpecial :: String -> Maybe (Token, String)
+startSpecial (a:b:r) | isEndpointJoin a b = Just (Token [a,b], r)
+startSpecial s | Just r <-
+    case mapMaybe (\t -> stripPrefix t s >>= \s' -> pure (t, s')) specialTokens of
+      [(t,s')] -> Just (Token t, s')
+      _ -> Nothing
+  = Just r
+startSpecial _ = Nothing
+specialTokens =
+  [ "."
+  , "("
+  , ")"
+  , "<="
+  , ","
+  , "~" ]
+endpointMarkers :: [Char]
+endpointMarkers = "~=<>"
+isEndpointJoin a b = a `elem` endpointMarkers && b `elem` endpointMarkers
+predArity :: String -> Arity
+predArity = (flip replicate _t) . (+1) . length . filter (== '/')
+
+data JoinOp = Binary String String | Fixed String
+  deriving (Eq, Show)
+
+toJoinOp :: String -> Maybe JoinOp
+toJoinOp = \case
+  "," -> Just $ Fixed ","
+  "~" -> Just $ Fixed "~"
+  [a,b] | isEndpointJoin a b -> Just $ Binary [a] [b]
+  _ -> Nothing
+
+data E'
+  = Leaf [E'] -- e's must be t's
+  | Join JoinOp E' E'
+  | TVar CS.Var
+  | TPred CS.Pred
+  deriving (Eq, Show)
+
+efix (CS.Term a) = a
+instance OfItem E' where
+  finish [CS.Term (TPred p), (CS.Term x), (CS.Term y)] ty | ty == _te, Just op <- toJoinOp p = Join op x y
+  finish (CS.Term (TPred p) : ts) ty | ty == _te = Leaf (TPred p : map efix ts)
+  finish [CS.Term (TVar v)] ty | ty == _t = TVar v
+  finish [CS.Term (TPred p)] ty | ty == _t = TPred p
+  finish ts _ = error $ show ts
+  mkVar v = TVar v
+  mkPred p = TPred p
+
+type Schema = CS.Pred -> [Arity]
+defaultSchema :: Schema
+defaultSchema = \s -> [predArity s]
+
+itemize :: Schema -> Token -> Item E'
+itemize _s (Token "(") = ItemPush
+itemize _s (Token ")") = ItemPop
+itemize _s (Token "_") = ItemHole
+itemize _s (Token pr) | Just _ <- toJoinOp pr = _join $ mkPred pr
+itemize _s (Token s@(x : _)) | isUpper x = _var $ mkVar s
+itemize _s (Token s@('_' : _))           = _var $ mkVar s
+itemize  s (Token p@('?' : _)) = Items [ ItemAtom [] [CS.Term $ mkPred p] ar _te | ar <- s p ]
+itemize  s (Token p@('!' : _)) = Items [ ItemAtom [] [CS.Term $ mkPred p] ar _te | ar <- s p ]
+itemize _s (Token p@(_ : _)) = ItemAtom [] [CS.Term $ mkPred p] [] _t
+itemize _s (Token []) = error "empty word"
+
+-- GOALS
+-- - parse a query (just vars)
+-- - add ! to itemizer
+-- - run something
+-- - add the rest of Term
+turnConvert :: E' -> E
+turnConvert = \case
+    Leaf (TPred ('?' : name) : rest) -> Atom (Pattern AtomFree NoVars (map fix $ TPred name : rest))
+    Leaf (TPred ('!' : name) : rest) -> Atom (Pattern AtomPos  NoVars (map fix $ TPred name : rest))
+    Join (Fixed ",") a b -> And (turnConvert a) (turnConvert b)
+    _ -> error "unreachable?"
+  where
+    fix = \case
+      TVar v -> TermVar $ FreeVar v
+      TPred p -> TermPred $ Pred p
+      _ -> error "unreachable?"
+
+firstSuccess [Success1 _ e] = e
+firstSuccess [Error e _] = error e
+
+main4 :: String -> E
+main4 = turnConvert . firstSuccess . CS.parse . map (itemize defaultSchema) . tokenize startSpecial
+
+main5 input = do
+  let p = [RuleStatement Nothing (main4 input)]
+  _ <- writeGenDerp "asdf" p
+  pure ()

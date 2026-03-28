@@ -2,7 +2,14 @@
 --    OOOPS = out-of-order predicate syntax
 --    FLOPS = flexible-order ...
 --    cat shelf = "cat on shelf"
-module CatShelf where
+module CatShelf
+  ( OfItem, finish, mkVar, mkPred, Item, Token(..), Term(..)
+  , parse, tokenize, runCatShelf
+  , _t, _te, _join, _comma, _var
+  , Pred, Var
+  , Item(..)
+  , ParseResult(..)
+  , Arity, Ty ) where
 
 -- High level idea:
 -- logical form: cat(X)
@@ -18,7 +25,7 @@ module CatShelf where
 -- standard form:
 --   cat X, on X Y, shelf Y
 
-import Prelude hiding (Word, lex)
+import Prelude hiding (Word)
 import Control.Monad.State
 import Control.Monad.Writer (WriterT, runWriterT, tell)
 import Control.Monad.Except
@@ -38,7 +45,6 @@ pwrap x = "(" <> x <> ")"
 data Ty = Ty String
   deriving (Eq, Show, Ord)
 type Arity = [Ty]
-type Schema = Pred -> [Arity]
 data Term a = Term a
   deriving (Eq, Show, Ord)
 data Atom a = Atom Pred [Term a]
@@ -67,9 +73,6 @@ _join op = ItemAtom [] [Term op] [_te, _te] _te
 _comma :: OfItem a => Item a
 _comma = _join (mkPred ",")
 _var v = ItemAtom [] [Term v] [] _t
-
-predArity :: String -> Arity
-predArity = (flip replicate _t) . (+1) . length . filter (== '/')
 
 holeSymbol = "."
 hole :: OfItem a => a
@@ -146,10 +149,10 @@ step (l, Items ts : r) = do
 
 -- Introduce join
 step (lt@(ItemAtom _ _ [ty] _ : _), rt@(ItemAtom _ _ (ty':_) _ : _)) | ty == ty' = do
-  v <- mkVar <$> fresh'
+  v <- mkVar <$> fresh "x"
   pure (lt, _var v : _comma : _var v : rt)
 step (lt@(ItemAtom _ _ (ty':_) _) : l, rt@(ItemAtom _ _ [ty] _) : r) | ty == ty' = do
-  v <- mkVar <$> fresh'
+  v <- mkVar <$> fresh "x"
   pure (rt : l, _var v : _comma : _var v : lt : r)
   -- pure (x2 : l, x1 : r)
 
@@ -208,9 +211,6 @@ data ParseResult a b
   | Success1 [Atom a] b
   deriving (Show)
 
-defaultSchema :: Schema
-defaultSchema = \s -> [predArity s]
-
 steps :: (OfItem a, Eq a, Show a) => St a -> M a [St a]
 steps = iter $ wrap step
 
@@ -263,44 +263,28 @@ iter f v = do
       r <- iter f v''
       pure (v : r)
 
-run2 :: String -> [ParseResult E E]
-run2 = run1 . map (tokenize defaultSchema) . lex
+-- run2 :: String -> [ParseResult E E]
+-- run2 = run1 . map (tokenize defaultSchema) . lex
 
-run3 f =
-  case run2 f of
-    Success1 _ t : _ -> putStrLn $ pwrap f <> " ok: " <> show t
-    Error str _ : _ -> do
-      let msg = "failed: " <> f <> "\n" <> str
-      putStrLn msg
-    _ -> error "todo"
+--run3 f =
+--  case run2 f of
+--    Success1 _ t : _ -> putStrLn $ pwrap f <> " ok: " <> show t
+--    Error str _ : _ -> do
+--      let msg = "failed: " <> f <> "\n" <> str
+--      putStrLn msg
+--    _ -> error "todo"
+
+
+parse :: (Eq a, OfItem a, Show a) => [Item a] -> [ParseResult a a]
+parse = run1
 
 runCatShelf base = do
-  f <- readFile (base <> ".turn")
-  run3 f
-
-data JoinOp = Binary String String | Fixed String
-  deriving (Eq, Show)
-
-specialTokens =
-  [ "."
-  , "("
-  , ")"
-  , "<="
-  , ","
-  , "~" ]
-endpointMarkers :: [Char]
-endpointMarkers = "~=<>"
-isEndpointJoin a b = a `elem` endpointMarkers && b `elem` endpointMarkers
-toJoinOp :: String -> Maybe JoinOp
-toJoinOp = \case
-  "," -> Just $ Fixed ","
-  "~" -> Just $ Fixed "~"
-  [a,b] | isEndpointJoin a b -> Just $ Binary [a] [b]
-  _ -> Nothing
+  pure ()
+  -- f <- readFile (base <> ".turn")
+  -- parse f
 
 --efix (TermVar v) = TVar' v
 --efix (TermPred p) = TPred' p
-efix (Term a) = a
 --efix (Term (TVar v)) = TVar' v
 --efix (Term (TPred v)) = TPred' v
 --efix e = error $ show e
@@ -311,53 +295,18 @@ efix (Term a) = a
 --   | TPred' Pred
 --   deriving (Eq, Show)
 
-data E
-  = Leaf [E] -- e's must be t's
-  | Join JoinOp E E
-  | TVar Var
-  | TPred Pred
-  deriving (Eq, Show)
-
-instance OfItem E where
-  finish [Term (TPred p), (Term x), (Term y)] ty | ty == _te, Just op <- toJoinOp p = Join op x y
-  finish (Term (TPred p) : ts) ty | ty == _te = Leaf (TPred p : map efix ts)
-  finish [Term (TVar v)] ty | ty == _t = TVar v
-  --finish [TermVar v] ty | ty == _t = TVar v
-  finish ts _ = error $ show ts
-  mkVar v = TVar v
-  mkPred p = TPred p
-
-data Token = Token String
-  deriving (Eq, Ord, Show)
-startSpecial :: String -> Maybe (Token, String)
-startSpecial (a:b:r) | isEndpointJoin a b = Just (Token [a,b], r)
-startSpecial s | Just r <-
-    case mapMaybe (\t -> stripPrefix t s >>= \s' -> pure (t, s')) specialTokens of
-      [(t,s')] -> Just (Token t, s')
-      _ -> Nothing
-  = Just r
-startSpecial _ = Nothing
+data Token = Token String deriving (Eq, Ord, Show)
 token "" = []
 token acc = [Token $ reverse acc]
-pickToken' acc "" = token acc
-pickToken' acc s | Just (t, s') <- startSpecial s = (token acc) <> [t] <> pickToken' "" s'
-pickToken' acc (c:s') | isSpace c = token acc <> pickToken' "" s'
-pickToken' acc (c:s') = pickToken' (c:acc) s'
-pickToken s = pickToken' "" s
+pickToken' sp acc "" = token acc
+pickToken' sp acc s | Just (t, s') <- sp s = (token acc) <> [t] <> pickToken' sp "" s'
+pickToken' sp acc (c:s') | isSpace c = token acc <> pickToken' sp "" s'
+pickToken' sp acc (c:s') = pickToken' sp (c:acc) s'
+pickToken sp s = pickToken' sp "" s
+tokenize sp s = pickToken sp s
+
 pickOne "" = Nothing
 pickOne s = let (t, r) = break isSpace s in Just (Token t, drop 1 r)
-lex s = pickToken s
-
-tokenize :: OfItem a => Schema -> Token -> Item a
-tokenize _s (Token "(") = ItemPush
-tokenize _s (Token ")") = ItemPop
-tokenize _s (Token "_") = ItemHole
-tokenize _s (Token pr) | Just _ <- toJoinOp pr = _join $ mkPred pr
-tokenize _s (Token s@(x : _)) | isUpper x = _var $ mkVar s
-tokenize _s (Token s@('_' : _))           = _var $ mkVar s
-tokenize  s (Token p@(_ : _)) = Items [ ItemAtom [] [Term $ mkPred p] ar _te | ar <- s p ]
-tokenize _s (Token []) = error "empty word"
-
 eg1 = "cat on shelf"
 eg1' = "on cat shelf"
 eg2 = "cat on shelf shelf on cat"
@@ -387,4 +336,4 @@ tests =
   , "x (z/x/y z) y"
   ]
 
-chk = mapM_ run3 tests
+-- chk = mapM_ run3 tests

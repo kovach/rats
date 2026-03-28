@@ -10,6 +10,8 @@ import DrawDiagram.Main (runDrawDiagram)
 import TestPipeline (runTestPipeline)
 import CatShelf (runCatShelf)
 import CatShelf
+import Compile
+import Basic (pp)
 
 main :: IO ()
 main = do

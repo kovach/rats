@@ -60,6 +60,7 @@ termCompile = \case
   TermExt "$" -> "autoinc()"
   TermExt _ -> error "unhandled"
   v@TermBlank -> pp v
+  TermBin _ _ _ -> error "todo"
 termsCompile = map termCompile
 idCompile (Id n vs) = cons "id" [show n, toBinding vs]
 toBinding ts = cons "bind" (map pp ts)
@@ -70,7 +71,7 @@ tCompile = \case
   Max a b -> cons "max" (map tCompile [a,b])
   Top -> cons "top" []
   Bot -> cons "bot" []
-cons s t = s <> args t
+cons s t = pwrap $ spaces (s : t)
 
 chunkAtoms [] = ""
 chunkAtoms xs =

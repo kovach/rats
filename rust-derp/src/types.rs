@@ -146,8 +146,12 @@ impl Term {
             Term::Num(n) => n.to_string(),
             Term::Blank => "_".to_owned(),
             Term::App(name, args) => {
-                let arg_strs: Vec<String> = args.iter().map(|t| t.pp(i)).collect();
-                format!("{}({})", name.resolve(i), arg_strs.join(", "))
+                if args.is_empty() {
+                    name.resolve(i).to_owned()
+                } else {
+                    let arg_strs: Vec<String> = args.iter().map(|t| t.pp(i)).collect();
+                    format!("({} {})", name.resolve(i), arg_strs.join(" "))
+                }
             }
             Term::Str(s) => format!("\"{}\"", s.resolve(i)),
             Term::Id(n) => format!("#{}", n),

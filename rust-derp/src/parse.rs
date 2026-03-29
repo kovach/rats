@@ -11,8 +11,7 @@ enum Token {
     Nat(i32),
     Str(String),
     // punctuation
-    LParen,         // ( with whitespace before it (or at start)
-    LParenAdj,      // ( immediately following an identifier — marks function application
+    LParen,
     RParen,
     Comma,
     Dot,
@@ -36,23 +35,18 @@ fn lex(input: &str) -> Result<Vec<Token>, String> {
     let chars: Vec<char> = input.chars().collect();
     let mut pos = 0;
     let mut tokens = Vec::new();
-    // True when the last emitted token was an Ident — used to distinguish
-    // adjacent `f(` (application) from spaced `f (` (predicate + parens).
-    let mut after_ident = false;
 
     while pos < chars.len() {
         let c = chars[pos];
 
-        // Skip whitespace; clears the adjacency flag
+        // Skip whitespace
         if c == ' ' || c == '\n' || c == '\t' || c == '\r' {
-            after_ident = false;
             pos += 1;
             continue;
         }
 
         // Hyphens: two or more → RuleSep; single → Minus
         if c == '-' {
-            after_ident = false;
             if pos + 1 < chars.len() && chars[pos + 1] == '-' {
                 while pos < chars.len() && chars[pos] == '-' {
                     pos += 1;
@@ -74,7 +68,6 @@ fn lex(input: &str) -> Result<Vec<Token>, String> {
             }
             let s: String = chars[start..pos].iter().collect();
             tokens.push(Token::Ident(s));
-            after_ident = true;
             continue;
         }
 
@@ -88,17 +81,14 @@ fn lex(input: &str) -> Result<Vec<Token>, String> {
                 }
                 let s: String = chars[start..pos].iter().collect();
                 tokens.push(Token::Ident(s));
-                after_ident = true;
             } else {
                 tokens.push(Token::Blank);
-                after_ident = false;
             }
             continue;
         }
 
         // Digits
         if c.is_ascii_digit() {
-            after_ident = false;
             let start = pos;
             while pos < chars.len() && chars[pos].is_ascii_digit() {
                 pos += 1;
@@ -111,7 +101,6 @@ fn lex(input: &str) -> Result<Vec<Token>, String> {
 
         // String literal
         if c == '"' {
-            after_ident = false;
             pos += 1;
             let mut s = String::new();
             loop {
@@ -131,8 +120,7 @@ fn lex(input: &str) -> Result<Vec<Token>, String> {
 
         // Single-character tokens
         let tok = match c {
-            // ( immediately following an ident marks function application
-            '(' => if after_ident { Token::LParenAdj } else { Token::LParen },
+            '(' => Token::LParen,
             ')' => Token::RParen,
             ',' => Token::Comma,
             '.' => Token::Dot,
@@ -144,7 +132,6 @@ fn lex(input: &str) -> Result<Vec<Token>, String> {
             '/' => Token::Slash,
             other => return Err(format!("unexpected character '{}' at byte pos {}", other, pos)),
         };
-        after_ident = false;
         pos += 1;
         tokens.push(tok);
     }
@@ -232,22 +219,6 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parens<T>(&mut self, f: impl FnOnce(&mut Self) -> PResult<T>) -> PResult<T> {
-        self.expect(&Token::LParen)?;
-        let v = f(self)?;
-        self.expect(&Token::RParen)?;
-        Ok(v)
-    }
-
-    /// Like parens but requires LParenAdj — used for function application `f(args)`
-    /// to distinguish it from a predicate followed by a parenthesized term `f (expr)`.
-    fn adj_parens<T>(&mut self, f: impl FnOnce(&mut Self) -> PResult<T>) -> PResult<T> {
-        self.expect(&Token::LParenAdj)?;
-        let v = f(self)?;
-        self.expect(&Token::RParen)?;
-        Ok(v)
-    }
-
     fn comma_sep<T>(&mut self, f: impl Fn(&mut Self) -> PResult<T>) -> PResult<Vec<T>> {
         let mut results = Vec::new();
         match f(self) {
@@ -317,15 +288,9 @@ impl<'a> Parser<'a> {
             self.pos = saved;
         }
 
-        // Try app: predicate immediately followed by parens `f(args)`, or plain predicate
+        // Try plain predicate
         let saved = self.pos;
         if let Ok(name) = self.predicate() {
-            let saved2 = self.pos;
-            if let Ok(args) = self.adj_parens(|p| p.comma_sep(|p| p.term())) {
-                let sym = self.intern.intern(&name);
-                return Ok(aapp(Name::Sym(sym), args));
-            }
-            self.pos = saved2;
             if name.starts_with('#') {
                 return Ok(apred(Name::Str(name)));
             } else {
@@ -364,12 +329,25 @@ impl<'a> Parser<'a> {
         }
         self.pos = saved;
 
-        // Try parenthesized term
+        // Try parenthesized: (pred args...) = application, or (term) = grouping
         let saved = self.pos;
-        if let Ok(inner) = self.parens(|p| p.term()) {
-            return Ok(inner);
+        if self.expect(&Token::LParen).is_ok() {
+            let saved2 = self.pos;
+            if let Ok(name) = self.predicate() {
+                let args = self.many(|p| p.term())?;
+                if self.expect(&Token::RParen).is_ok() {
+                    let sym = self.intern.intern(&name);
+                    return Ok(aapp(Name::Sym(sym), args));
+                }
+            }
+            self.pos = saved2;
+            if let Ok(inner) = self.term() {
+                if self.expect(&Token::RParen).is_ok() {
+                    return Ok(inner);
+                }
+            }
+            self.pos = saved;
         }
-        self.pos = saved;
 
         Err(format!("expected term at token pos {}", self.pos))
     }

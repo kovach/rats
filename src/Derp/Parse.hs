@@ -17,7 +17,7 @@ term = app <|> v <|> p <|> b <|> n <|> str
     p = T.TermPred <$> predicate
     b = pure T.TermBlank <* char '_'
     n = T.TermNum <$> nat
-    app = T.TermApp <$> predicate <*> parens (commaSep term)
+    app = parens (T.TermApp <$> predicate <*> (ws *> wsSep term))
     str = T.TermString <$> stringLit
 
 tuple :: Parser T.Tuple

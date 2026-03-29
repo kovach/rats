@@ -11,7 +11,7 @@ fn run(src: &str) -> (derp::types::Tuples, derp::types::TermTable) {
 /// Invariant 1: no Term::App appears in any output Tuple.
 #[test]
 fn test_no_app_in_tuples() {
-    let (tuples, _table) = run("-- foo pair(1, 2).");
+    let (tuples, _table) = run("-- foo (pair 1 2).");
     for (_pred, set) in &tuples.relations {
         for tuple in set {
             for term in tuple {
@@ -27,7 +27,7 @@ fn test_no_app_in_tuples() {
 /// Invariant 2: every TermTable entry has only non-App args (flat).
 #[test]
 fn test_table_keys_are_flat() {
-    let (_tuples, table) = run("-- foo bar(pair(triple(1,2),3)).");
+    let (_tuples, table) = run("-- foo (bar (pair (triple 1 2) 3)).");
     for entry in table.entries() {
         if let Term::App(_, args) = entry.as_ref() {
             for arg in args {

@@ -73,13 +73,13 @@ executable rats
       , Parser
       , Parser2
       , CatShelf
-      , TestPipeline
+      , Process
 
       , Derp.Types, Derp.Core, Derp.Parse
       , Derp.Gen
 
+      , TestPipeline
       , Server
-
       , DrawDiagram.Core, DrawDiagram.Layout, DrawDiagram.Main
 
     -- LANGUAGE extensions used by modules in this package.
@@ -107,7 +107,8 @@ executable rats
                       diagrams-svg,
                       svg-builder,
                       colour,
-                      directory
+                      directory,
+                      split
 
 
     -- Directories containing source files.

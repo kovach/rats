@@ -24,6 +24,7 @@ import qualified Data.ByteString.Lazy.Char8 as BLC
 
 import Compile (main1, main1')
 import Basic
+import Types (pattern PredIsId)
 import qualified Derp.Parse as DP
 import qualified Derp.Core as D
 import DrawDiagram.Layout (Problem(..), I(..), Constraint(..), T(..), IntervalDiagram(..))
@@ -46,16 +47,16 @@ toT _ _     = Nothing
 tuplesToProblem :: [D.Tuple] -> Problem T
 tuplesToProblem tuples = Problem intervals constraints True
   where
-    ids = [arg | [D.TermPred "isId", arg] <- tuples]
+    ids = [arg | [D.TermPred PredIsId, arg] <- tuples]
     tags =
       [ (i, ty ++ if length r > 0 then " " <> (unwords $ map pp r) else "")
       | i <- ids
       , (D.TermPred ty : a : r) <- tuples, a == i
-      , not (ty `elem` ["isId", "last", "moveLt", "moveBefore", "notLast", "move_at"])
+      , not (ty `elem` [PredIsId, "last", "moveLt", "move-before", "not-last", "move-at"])
       ]
     intervals =
       [ I ty (L k) (R k)
-      | [D.TermPred "isId", arg] <- tuples
+      | [D.TermPred PredIsId, arg] <- tuples
       , (i, ty) <- tags
       , i == arg
       , let k = termToKey arg
@@ -86,7 +87,7 @@ processTuples base tuples = do
 
 compileAndRun :: String -> IO [D.Tuple]
 compileAndRun base = do
-  _ <- main1' base
+  _ <- main1 base
   _ <- runRustDerp base
   let outDerp = base ++ ".gen.out.derp"
   putStrLn $ "parsing " ++ outDerp ++ "..."

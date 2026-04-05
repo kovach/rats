@@ -37,7 +37,7 @@ constraintCompile = \case
   -- NegChose v -> "!" <> spaces [chosePred, varCompile v]
   Cmp op a b -> spaces [opString op, tCompile a, tCompile b]
   Eq a b -> spaces [termCompile a, "=", termCompile b]
-  IsId t -> spaces ["isId", termCompile t]
+  IsId t -> spaces [PredIsId, termCompile t]
   Val a b -> spaces ["val", termCompile a, termCompile b]
   Try (PPI p _ i ts) -> spaces [tryPred, cons (pp p) (pp i : termsCompile ts)]
   Try p -> error $ show p

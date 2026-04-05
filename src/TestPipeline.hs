@@ -1,6 +1,6 @@
 module TestPipeline where
 
-import Server (compileAndRun)
+import Process (compileAndRun)
 
 runTestPipeline :: String -> IO ()
-runTestPipeline = compileAndRun
+runTestPipeline s = compileAndRun s >> pure ()

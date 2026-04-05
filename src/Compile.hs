@@ -3,7 +3,7 @@
 {-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE ConstraintKinds #-}
-module Compile (main1, main2, main3, main4, main5) where
+module Compile (main1, main1', main2, main3, parseOne) where
 
 import Prelude hiding (pred, exp, take)
 import Control.Monad.Writer
@@ -22,6 +22,7 @@ import Debug.Trace
 import System.Process
 import System.Directory (createDirectoryIfMissing)
 import Data.Char
+import Data.List.Split
 
 import Basic
 import Types
@@ -32,7 +33,7 @@ import qualified MMap as M
 import qualified Derp.Core as D
 import qualified Derp.Parse as DP
 import qualified Derp.Gen as GD
-import CatShelf hiding (parse, Term, Pred, Var, fresh)
+import CatShelf hiding (parse, Term, Pred, Var)
 import qualified CatShelf as CS
 
 data VarScope = VS (Set Var) (Set Var)
@@ -164,6 +165,11 @@ checkTerm = \case
     tell [Val (TermVar v') (TermVar v)]
   _ -> pure ()
 
+checkCmp cmp a b =
+  case cmp of
+    ECEq -> [a `Eql` b]; ECNone -> []
+    ECLt -> [a `Lt` b]; ECGt -> [b `Lt` a]
+
 check :: MonadPatternWriter m => E -> m I
 check (Atom p@(Pattern AtomFree (AllVars v@(ExVar _) _) ts)) | isBuiltin ts = do
   mapM_ checkTerm ts
@@ -231,6 +237,21 @@ check (SameIsh a b) = do
   tell [al `Lt` bl, ar `Eql` br]
   pure $ I al ar
 check (Instead{}) = error "unreachable. Instead is pre-processed."
+check (GenAnd l r a b) = do
+  I al ar <- check a
+  I bl br <- check b
+  tell $ [Max al bl `Lt` Min ar br] <> checkCmp l al bl <> checkCmp r ar br
+  pure $ I (max' l al bl) (min' r ar br)
+
+max' ECEq a _ = a
+max' ECLt _ b = b
+max' ECGt a _ = a
+max' _ a b = Max a b
+min' ECEq a _ = a
+min' ECLt a _ = a
+min' ECGt _ b = b
+min' _ a b = Min a b
+
 
 checkAll :: E -> [Constraint]
 checkAll = snd . runWriter . check
@@ -366,8 +387,10 @@ transLe = fixpoint step
   where
     step lts = lts <> (Set.cartesianProduct lts lts & scm (\((x,a),(b,y)) -> if a == b then one (x,y) else none))
 
+prs :: Show a => Set (a, a) -> String
+prs = unlines . map show . Set.toList
 toLes :: Constraints -> Set (Var, Var)
-toLes cs = result
+toLes cs = trace ("!!\n" <> prs base <> "\n::\n" <> prs result <> "\n") $ result
   where
     result = base & transLe & scm toLL
     toLL = \case (L (TermVar u), L (TermVar v)) -> one (u,v); _ -> none
@@ -387,13 +410,19 @@ toLes cs = result
 depVarSets :: [Constraint] -> [VarScope]
 depVarSets cs = mergeSeq . map removeHead . mergeIdentical $ ans
   where
-    removeHead (VS h b) = (VS h $ Set.filter (not . ignoreCase h) b)
-    --removeHead (h, b) = (h, Set.filter (not . (`elem` h)) b)
+    ans = [ (v, downward v les) | v <- heads ]
+    heads = mapMaybe findPos cs
+    les = toLes $ Set.fromList cs
+    downward v = Set.map fst . Set.filter ((== v) . snd)
+    findPos (Constraint (Pattern AtomPos (PVar (Just v) _) _)) = Just v
+    findPos _ = Nothing -- TODO AtomAsk?
+
     mergeIdentical [] = []
     mergeIdentical ((h,b) : xs) =
       -- take out all groups with the same dependencies
       let (same, rest) = partition ((== b) . snd) xs
        in (VS (Set.fromList $ h : map fst same) b) : mergeIdentical rest
+    removeHead (VS h b) = (VS h $ Set.filter (not . ignoreCase h) b)
     -- TODO cleanup
     mergeSeq xs = case mapMaybe (uncurry mergeSeq') $ picks xs of
                     xs':_ -> mergeSeq xs'
@@ -405,12 +434,6 @@ depVarSets cs = mergeSeq . map removeHead . mergeIdentical $ ans
     canMergeSeq (VS _ b1) (VS h2 b2) =
       Set.isSubsetOf b2 b1
       && (b1 `Set.difference` b2) `Set.isSubsetOf` h2
-    ans = [ (v, downward v les) | v <- heads ]
-    heads = mapMaybe findPos cs
-    les = toLes $ Set.fromList cs
-    downward v = scm (\(a,b) -> if b == v then one a else none)
-    findPos (Constraint (Pattern AtomPos (PVar (Just v) _) _)) = Just v
-    findPos _ = Nothing -- TODO AtomAsk?
 
 addScopes :: Name -> [VarScope] -> [Constraint]
 addScopes n = concatMap fix
@@ -435,22 +458,21 @@ groupScopes :: [VarScope] -> [Constraint] -> [Rule]
 groupScopes vs cs = map (\v -> groupScope v cs) vs
 
 fixScopes :: Name -> [Constraint] -> [Rule]
-fixScopes n c = groupScopes deps $ addScopes n deps <> c <> newLts -- TODO: breaks ~
+fixScopes n c = groupScopes deps $ addScopes n deps <> c -- <> newLts -- TODO: breaks ~
   where
     deps = depVarSets c
-    newLts = do
-      VS hs bs <- deps
-      b <- TermVar <$> Set.toList hs
-      a <- TermVar <$> (Set.toList bs `intersect` evs)
-      pure $ Cmp OpLt (L a) (L b)
+    --newLts = do
+    --  VS hs bs <- deps
+    --  b <- TermVar <$> Set.toList hs
+    --  a <- TermVar <$> (Set.toList bs `intersect` evs)
+    --  pure $ Cmp OpLt (L a) (L b)
+    --evs = episodeVars c
+    --episodeVars = mapMaybe f
+    --  where
+    --    f (Constraint (Pattern _ (PVar (Just v) _) _)) = Just v
+    --    f _ = Nothing
 
-    evs = episodeVars c
-    episodeVars = mapMaybe f
-      where
-        f (Constraint (Pattern _ (PVar (Just v) _) _)) = Just v
-        f _ = Nothing
-
-generateConstraints (TRule n e) = trace (unlines $ map pp sets) c'
+generateConstraints (TRule n e) = trace ("f: " <> (unlines $ map pp sets)) c'
   where
     c' = fixScopes n c
     c = expandConstraints
@@ -522,7 +544,7 @@ simplRule (Rule {body, head = h}) = Rule {body = body', head = head'}
     ok _ = True
 
 compileExp :: TRule -> [Rule]
-compileExp pr@(TRule n _) = rs -- <> tryPatterns
+compileExp pr@(TRule _n _) = rs -- <> tryPatterns
   where
     rs = map simplRule . generateConstraints . elab $ pr
     --r@(Rule _ h) = generateConstraints . elab $ pr
@@ -612,13 +634,12 @@ main1 :: String -> IO String
 main1 base = do
   pr0 <- readFile (base ++ ".turn")
   let ttt = TP.parse pr0
-  (result, elabText, ruleText) <- genDerp ttt
-  putStrLn $ "generated derp:\n" <> ruleText
-  let outFile = base <> ".gen.derp"
-  writeFile outFile result
-  writeFile (base ++ ".elab.turn") elabText
-  putStrLn $ "wrote file " <> outFile
-  pure result
+  writeGenDerp base ttt
+
+main1' base = do
+  pr0 <- readFile (base ++ ".turn")
+  let ttt = parseOne pr0
+  writeGenDerp base ttt
 
 main2' input = do
   let rs = DP.parse input -- assertParse prog $ lexComments ";" input
@@ -643,35 +664,51 @@ main3 = do
 
 -- Parsing Stuff --
 -- TODO move this
+data Token = Token String deriving (Eq, Ord, Show)
+token "" = []
+token acc = [Token $ reverse acc]
+pickToken' sp acc "" = token acc
+pickToken' sp acc s | Just (t, s') <- sp s = (token acc) <> [t] <> pickToken' sp "" s'
+pickToken' sp acc (c:s') | isSpace c = token acc <> pickToken' sp "" s'
+pickToken' sp acc (c:s') = pickToken' sp (c:acc) s'
+pickToken sp s = pickToken' sp "" s
+tokenize sp s = pickToken sp s
+
+pickOne "" = Nothing
+pickOne s = let (t, r) = break isSpace s in Just (Token t, drop 1 r)
 startSpecial :: String -> Maybe (Token, String)
-startSpecial (a:b:r) | isEndpointJoin a b = Just (Token [a,b], r)
+startSpecial (a:b:r) | Just _ <- isEndpointJoin a b = Just (Token [a,b], r)
 startSpecial s | Just r <-
     case mapMaybe (\t -> stripPrefix t s >>= \s' -> pure (t, s')) specialTokens of
       [(t,s')] -> Just (Token t, s')
       _ -> Nothing
   = Just r
 startSpecial _ = Nothing
+
 specialTokens =
   [ "."
   , "("
   , ")"
   , "<="
   , ","
+  , "+"
   , "~" ]
-endpointMarkers :: [Char]
-endpointMarkers = "~=<>"
-isEndpointJoin a b = a `elem` endpointMarkers && b `elem` endpointMarkers
-predArity :: String -> Arity
-predArity = (flip replicate _t) . (+1) . length . filter (== '/')
+endpointMarkers :: [(Char, EndpointCmp)]
+endpointMarkers = zip "~=<>" [ECNone, ECEq, ECLt, ECGt]
+isEndpointJoin a b = do
+  av <- lookup a endpointMarkers
+  bv <- lookup b endpointMarkers
+  pure (av, bv)
 
-data JoinOp = Binary String String | Fixed String
+data JoinOp = Binary EndpointCmp EndpointCmp | Fixed String
   deriving (Eq, Show)
 
 toJoinOp :: String -> Maybe JoinOp
 toJoinOp = \case
   "," -> Just $ Fixed ","
   "~" -> Just $ Fixed "~"
-  [a,b] | isEndpointJoin a b -> Just $ Binary [a] [b]
+  "/" -> Just $ Fixed "/"
+  [a,b] | Just (l,r) <- isEndpointJoin a b -> Just $ Binary l r
   _ -> Nothing
 
 data E'
@@ -692,9 +729,24 @@ instance OfItem E' where
   mkPred p = TPred p
 
 type Schema = CS.Pred -> [Arity]
-defaultSchema :: Schema
-defaultSchema = \s -> [predArity s]
+predArity :: CS.Pred -> Int
+predArity s = (+1) . length . filter (== '/') $ s
+-- TODO: how safe is this? allow `foo` to refer to both nullary and unary predicates
+specialArity p = do
+  n <- case drop 1 p of
+    "move" -> Just 2
+    "at" -> Just 2
+    "is" -> Just 2
+    _ -> Nothing
+  pure $ replicate n _t
 
+defaultSchema :: Schema
+defaultSchema p | Just t <- specialArity p = [t]
+defaultSchema p =
+  let n = predArity p in
+      if n == 1 then [[], [_t]] else [replicate n _t]
+
+-- assign an item type to each token
 itemize :: Schema -> Token -> Item E'
 itemize _s (Token "(") = ItemPush
 itemize _s (Token ")") = ItemPop
@@ -708,15 +760,18 @@ itemize _s (Token p@(_ : _)) = ItemAtom [] [CS.Term $ mkPred p] [] _t
 itemize _s (Token []) = error "empty word"
 
 -- GOALS
--- - parse a query (just vars)
--- - add ! to itemizer
--- - run something
+-- * parse a query (just vars)
+-- * add ! to itemizer
+-- * compile something
+-- * split on '.'
+-- * run something
 -- - add the rest of Term
 turnConvert :: E' -> E
 turnConvert = \case
     Leaf (TPred ('?' : name) : rest) -> Atom (Pattern AtomFree NoVars (map fix $ TPred name : rest))
     Leaf (TPred ('!' : name) : rest) -> Atom (Pattern AtomPos  NoVars (map fix $ TPred name : rest))
     Join (Fixed ",") a b -> And (turnConvert a) (turnConvert b)
+    Join (Binary l r) a b -> GenAnd l r (turnConvert a) (turnConvert b)
     _ -> error "unreachable?"
   where
     fix = \case
@@ -724,13 +779,22 @@ turnConvert = \case
       TPred p -> TermPred $ Pred p
       _ -> error "unreachable?"
 
-firstSuccess [Success1 _ e] = e
-firstSuccess [Error e _] = error e
+firstSuccess parses =
+    case mapMaybe s1 parses of
+      [e] -> e
+      _ -> error $ "bad parse: " <> show parses
+  where
+    s1 (Success1 _ e) = Just e
+    s1 _ = Nothing
+--firstSuccess [Success1 _ e] = e
+--firstSuccess [Error e _] = error e
 
-main4 :: String -> E
-main4 = turnConvert . firstSuccess . CS.parse . map (itemize defaultSchema) . tokenize startSpecial
+splitRules :: [Token] -> [[Token]]
+splitRules = filter (not . null) . splitOn [Token "."]
+parseCS :: String -> [E]
+parseCS = map convert . splitRules . tokenize startSpecial
+  where
+    convert = turnConvert . firstSuccess . CS.parse . map (itemize defaultSchema)
 
-main5 input = do
-  let p = [RuleStatement Nothing (main4 input)]
-  _ <- writeGenDerp "asdf" p
-  pure ()
+parseOne :: String -> [Statement]
+parseOne input = map (RuleStatement Nothing) (parseCS input)

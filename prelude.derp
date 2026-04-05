@@ -6,58 +6,42 @@ lt A B, eq B C -- lt A C.
 lt A A -- zzz A.
 
 ; move : id / it / to
-move Id It _, lt r(Id) T
+move Id It _, lt (r Id) T
 ---
-moveBefore Id It T.
+move-before Id It T.
 
-moveBefore I1 It T, moveBefore I2 It T, lt r(I1) l(I2)
+move-before I1 It T, move-before I2 It T, lt (r I1) (l I2)
 ---
-notLast I1 It T.
+not-last I1 It T.
 
 
-move M1 It _, move M2 It _, lt r(M1) l(M2)
+move M1 It _, move M2 It _, lt (r M1) (l M2)
 ---
 moveLt M1 M2.
 
-moveBefore I It T, !notLast I It T
+move-before I It T, !not-last I It T
 ----------------------------------
 last I It T.
 
-move M It To, AT = id("at", bind(M, nil()))
+move M It To, AT = (id "at:AT" (bind M nil))
 ----------------------------------------------
-isId AT, lt l(AT) r(AT), at AT It To, move_at M AT, eq l(AT) r(M).
+is-id AT, lt (l AT) (r AT), at AT It To, move-at M AT, eq (l AT) (r M).
 
-isId T, last Move _ l(T), move_at Move AT
+is-id T, last Move _ (l T), move-at Move AT
 --------------------------------------
-lt l(T) r(AT).
+lt (l T) (r AT).
 
-move_at M1 A1, moveLt M1 M2
+move-at M1 A1, moveLt M1 M2
 ---
-lt r(A1) r(M2).
+lt (r A1) (r M2).
 
+choice C, !is C _ -- todo C.
 
-;choose C1, choose C2, lt l(C1) l(C2)
-;---
-;choose/choose C2 C1 C2.
-;
-;choose/choose _ C1 C2, choose/choose _ C2 C3
-;--
-;not-immediate C3 C1 C3.
-;
-;choose/choose _ C1 C2, !not-immediate _ C1 C2 -- choose/immediate C2 C1 C2.
-;
-;choose C, !choose/choose _ _ C -- choose/index C C 1.
-;choose C, choose/index _ C I, choose/immediate _ C C2 -- choose/index C2 C2 (I + 1).
-
-;turn I1, buy I2, lt l(I1) l(I2), lt r(I2) r(I1)
-;---
-;turn/buy I1 I2.
-; lt l(I1) l(I2), lt r(I2) r(I1) -- outer/inner I1 I2.
-; turn I1, buy I2, outer/inner I1 I2
-; ---
-; turn/buy I1 I2.
-; turn/buy T _ -- bought T.
-; turn T, discard D hermit, outer/inner T D, !bought T -- gain-madman it.
-
-; lt l(A) B, lt B r(A) -- interval/point A B.
-
+; is-endpoint (max A B), lt A C, lt B C -- lt (max A B) C.
+; is-endpoint (min A B), lt C A, lt C B -- lt C (min A B).
+; is-endpoint (min A B), lt A C -- lt (min A B) C.
+; is-endpoint (min A B), lt B C -- lt (min A B) C.
+; is-endpoint (max A B), lt C A -- lt C (max A B).
+; is-endpoint (max A B), lt C B -- lt C (max A B).
+; is-endpoint (op O1 (op O2 A B) C) -- is-endpoint op(O2,A,B).
+; is-endpoint (op O1 C (op O2 A B)) -- is-endpoint op(O2,A,B).

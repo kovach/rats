@@ -71,17 +71,23 @@ pattern PP p ts <- Pattern _ _ (TermPred p : ts)
 pattern PPI p s i ts <- Pattern s (PVar (Just i) _) (TermPred p : ts)
 pattern PPP p a b ts = Pattern a b (TermPred p : ts)
 
+data EndpointCmp = ECLt | ECGt | ECEq | ECNone
+  deriving (Show, Eq, Ord)
+
 data E = Atom Pattern
        | EVar Term
        | After E
-       | And E E
+
+       | GenAnd EndpointCmp EndpointCmp E E
        | Seq E E
        | Par E E
        | Over E E
-       | Same E E
-       | SameIsh E E
-       | At E E
        | Under E E
+       | At E E
+       | And E E -- ~~
+       | Same E E -- ==
+       | SameIsh E E -- ~=
+
        | Instead Pattern E
        | SameNot E Pattern
   deriving (Show, Eq, Ord)
@@ -198,10 +204,17 @@ instance PP Constraint where
 instance PP Op where
   pp OpLt = "<"
   pp OpEq = "="
+instance PP EndpointCmp where
+  pp = \case
+    ECEq -> "="
+    ECLt -> "<"
+    ECGt -> ">"
+    ECNone -> "~"
 instance PP E where
   pp (Atom p) = pp p
   pp (After e) = "#" <> pp e
   pp (EVar e) = pp e
+  pp (GenAnd l r a b) = pwrap $ pp a <> " " <> pp l <> pp r <> " " <> pp b
   pp (And a b) = pwrap $ pp a <> ", " <> pp b
   pp (Seq a b) = pwrap $ pp a <> "; " <> pp b
   pp (Par a b) = pwrap $ pp a <> " | " <> pp b
@@ -225,6 +238,7 @@ eTraverse f = go
     go e@(EVar _) = f e
     go e@(Instead _ _) = f e -- TODO
     go (After e) = (After <$> go e)
+    go (GenAnd l r a b) = GenAnd l r <$> (go a) <*> (go b)
     go (And a b) = And <$> (go a) <*> (go b)
     go (Seq a b) = Seq <$> (go a) <*> (go b)
     go (Par a b) = Par <$> (go a) <*> (go b)
@@ -293,3 +307,6 @@ tVars (Min a b) = tVars a <> tVars b
 tVars (Max a b) = tVars a <> tVars b
 tVars Top = []
 tVars Bot = []
+
+-- special predicate names
+pattern PredIsId = "is-id"

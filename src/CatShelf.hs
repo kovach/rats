@@ -3,13 +3,15 @@
 --    FLOPS = flexible-order ...
 --    cat shelf = "cat on shelf"
 module CatShelf
-  ( OfItem, finish, mkVar, mkPred, Item, Token(..), Term(..)
-  , parse, tokenize, runCatShelf
+  ( OfItem, finish, mkVar, mkPred, Item, Term(..)
+  , parse, runCatShelf
   , _t, _te, _join, _comma, _var
   , Pred, Var
   , Item(..)
   , ParseResult(..)
   , Arity, Ty ) where
+
+-- TODO dead code
 
 -- High level idea:
 -- logical form: cat(X)
@@ -54,7 +56,6 @@ data Atom a = Atom Pred [Term a]
 data Word a = WTerm (Term a) | WPred Pred | WPush | WPop | WHole
   deriving (Eq, Show, Ord)
 
--- Item?
 data Item a
   -- a partially applied atom with `Arity` missing arguments.
   = ItemAtom (Stack (Item a)) [Term a] Arity Ty
@@ -149,10 +150,10 @@ step (l, Items ts : r) = do
 
 -- Introduce join
 step (lt@(ItemAtom _ _ [ty] _ : _), rt@(ItemAtom _ _ (ty':_) _ : _)) | ty == ty' = do
-  v <- mkVar <$> fresh "x"
+  v <- mkVar <$> fresh "X"
   pure (lt, _var v : _comma : _var v : rt)
 step (lt@(ItemAtom _ _ (ty':_) _) : l, rt@(ItemAtom _ _ [ty] _) : r) | ty == ty' = do
-  v <- mkVar <$> fresh "x"
+  v <- mkVar <$> fresh "X"
   pure (rt : l, _var v : _comma : _var v : lt : r)
   -- pure (x2 : l, x1 : r)
 
@@ -295,18 +296,6 @@ runCatShelf base = do
 --   | TPred' Pred
 --   deriving (Eq, Show)
 
-data Token = Token String deriving (Eq, Ord, Show)
-token "" = []
-token acc = [Token $ reverse acc]
-pickToken' sp acc "" = token acc
-pickToken' sp acc s | Just (t, s') <- sp s = (token acc) <> [t] <> pickToken' sp "" s'
-pickToken' sp acc (c:s') | isSpace c = token acc <> pickToken' sp "" s'
-pickToken' sp acc (c:s') = pickToken' sp (c:acc) s'
-pickToken sp s = pickToken' sp "" s
-tokenize sp s = pickToken sp s
-
-pickOne "" = Nothing
-pickOne s = let (t, r) = break isSpace s in Just (Token t, drop 1 r)
 eg1 = "cat on shelf"
 eg1' = "on cat shelf"
 eg2 = "cat on shelf shelf on cat"

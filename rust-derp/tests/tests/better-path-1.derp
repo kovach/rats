@@ -1,0 +1,19 @@
+edge A B
+-------------
+path A B 1 B.
+
+edge A B, path B C N _, #add 1 N M
+----------------------------------
+path A C M B.
+
+path A B M _, path A B N _, #lt M N
+-----------------------------------
+better-path A B N.
+
+path A B N NextNode, !better-path A B N
+---------------------------------------
+best-path A B N NextNode.
+
+edge a x. edge x c.
+edge a y. edge y c.
+edge a c.

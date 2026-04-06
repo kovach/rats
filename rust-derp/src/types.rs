@@ -7,25 +7,14 @@ use crate::sym::{Sym, Interner};
 
 // -- Term ---------------------------------------------------------------------
 
-pub type ATerm = Rc<Term>;
-
-pub fn avar(s: Name) -> ATerm { Rc::new(Term::Var(VarOp::Name(s))) }
-pub fn apred(s: Name) -> ATerm { Rc::new(Term::Pred(s)) }
-pub fn anum(n: i32) -> ATerm { Rc::new(Term::Num(n)) }
-pub fn ablank() -> ATerm { Rc::new(Term::Blank) }
-pub fn astr(s: Name) -> ATerm { Rc::new(Term::Str(s)) }
-pub fn aapp(cons: Name, args: Vec<ATerm>) -> ATerm { Rc::new(Term::App(cons, args)) }
-pub fn aid(id: u32) -> ATerm { Rc::new(Term::Id(id)) }
-pub fn achoice(t: ATerm) -> ATerm { Rc::new(Term::Choice(t)) }
-pub fn abinop(op: BinOp, l: ATerm, r: ATerm) -> ATerm { Rc::new(Term::BinOp(op, l, r)) }
-pub fn aterm_ptr_eq(a: &ATerm, b: &ATerm) -> bool { Rc::ptr_eq(a, b) }
-
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Serialize)]
 #[serde(untagged)]
 pub enum Name {
     #[serde(skip)]
     Sym(Sym),
     Str(String),
+    #[serde(skip)]
+    Special(String),  // builtin predicate, written #foo in source (stored without #)
 }
 
 impl Name {
@@ -33,6 +22,7 @@ impl Name {
         match self {
             Name::Sym(s) => i.resolve(*s),
             Name::Str(s) => s.as_str(),
+            Name::Special(s) => s.as_str(),
         }
     }
 
@@ -40,6 +30,7 @@ impl Name {
         match self {
             Name::Sym(s) => *s,
             Name::Str(_) => panic!("Name::as_sym called on Str"),
+            Name::Special(_) => panic!("Name::as_sym called on Special"),
         }
     }
 }
@@ -66,6 +57,19 @@ pub enum Term {
     Choice(ATerm),
     BinOp(BinOp, ATerm, ATerm),
 }
+
+pub type ATerm = Rc<Term>;
+
+pub fn avar(s: Name) -> ATerm { Rc::new(Term::Var(VarOp::Name(s))) }
+pub fn apred(s: Name) -> ATerm { Rc::new(Term::Pred(s)) }
+pub fn anum(n: i32) -> ATerm { Rc::new(Term::Num(n)) }
+pub fn ablank() -> ATerm { Rc::new(Term::Blank) }
+pub fn astr(s: Name) -> ATerm { Rc::new(Term::Str(s)) }
+pub fn aapp(cons: Name, args: Vec<ATerm>) -> ATerm { Rc::new(Term::App(cons, args)) }
+pub fn aid(id: u32) -> ATerm { Rc::new(Term::Id(id)) }
+pub fn achoice(t: ATerm) -> ATerm { Rc::new(Term::Choice(t)) }
+pub fn abinop(op: BinOp, l: ATerm, r: ATerm) -> ATerm { Rc::new(Term::BinOp(op, l, r)) }
+pub fn aterm_ptr_eq(a: &ATerm, b: &ATerm) -> bool { Rc::ptr_eq(a, b) }
 
 impl Serialize for Term {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
@@ -171,6 +175,7 @@ impl Term {
         match self {
             Term::Var(VarOp::Name(s)) => Term::Var(VarOp::Name(Name::Str(s.resolve(i).to_owned()))),
             Term::Var(op) => panic!("cannot resolve_names on compiled VarOp: {:?}", op),
+            Term::Pred(Name::Special(s)) => Term::Pred(Name::Special(s.clone())),
             Term::Pred(s) => Term::Pred(Name::Str(s.resolve(i).to_owned())),
             Term::Num(_) | Term::Blank | Term::Id(_) => self.clone(),
             Term::App(name, args) => {
@@ -187,21 +192,21 @@ impl Term {
     pub fn intern_names(&self, i: &mut Interner) -> Term {
         match self {
             Term::Var(VarOp::Name(Name::Str(s))) => Term::Var(VarOp::Name(Name::Sym(i.intern(s)))),
-            Term::Var(VarOp::Name(Name::Sym(_))) => self.clone(),
+            Term::Var(VarOp::Name(Name::Sym(_))) | Term::Var(VarOp::Name(Name::Special(_))) => self.clone(),
             Term::Var(op) => panic!("cannot intern_names on compiled VarOp: {:?}", op),
             Term::Pred(Name::Str(s)) => Term::Pred(Name::Sym(i.intern(s))),
-            Term::Pred(Name::Sym(_)) => self.clone(),
+            Term::Pred(Name::Sym(_)) | Term::Pred(Name::Special(_)) => self.clone(),
             Term::Num(_) | Term::Blank | Term::Id(_) => self.clone(),
             Term::App(name, args) => {
                 let new_name = match name {
                     Name::Str(s) => Name::Sym(i.intern(s)),
-                    n @ Name::Sym(_) => n.clone(),
+                    n @ Name::Sym(_) | n @ Name::Special(_) => n.clone(),
                 };
                 let new_args = args.iter().map(|a| Rc::new(a.intern_names(i))).collect();
                 Term::App(new_name, new_args)
             }
             Term::Str(Name::Str(s)) => Term::Str(Name::Sym(i.intern(s))),
-            Term::Str(Name::Sym(_)) => self.clone(),
+            Term::Str(Name::Sym(_)) | Term::Str(Name::Special(_)) => self.clone(),
             Term::Choice(t) => Term::Choice(Rc::new(t.intern_names(i))),
             Term::BinOp(op, l, r) => Term::BinOp(op.clone(), Rc::new(l.intern_names(i)), Rc::new(r.intern_names(i))),
         }

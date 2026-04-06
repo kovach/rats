@@ -1,0 +1,7 @@
+--
+  all_ground_ok,
+  bar 3,
+  baz 2,
+  foo 5,
+  negation_ok,
+  x.

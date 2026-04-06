@@ -1,0 +1,4 @@
+move A B, !win B -> win A.
+; a1 <--> a2 --> b --> c
+;  .       .     T     F
+move a1 a2. move a2 a1. move a2 b. move b c.

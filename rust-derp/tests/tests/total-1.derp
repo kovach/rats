@@ -1,0 +1,14 @@
+p A, p B, #lt A B, p C, #lt B C -- not-succ A C.
+
+p A, p B, #lt A B, !not-succ A B
+--------------
+next A B, not-first B, not-last A.
+
+p A, !not-first A -- first A.
+p A, !not-last A -- last A.
+
+first A -- sum A A.
+next A B, sum A X, #add X B C -- sum B C.
+last A, sum A V -- total V.
+
+p 1, p 2, p 3, p 7, p 4.

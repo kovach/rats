@@ -3,18 +3,19 @@
 direction-label h,
 direction-label v.
 
+
 ; If R contains A, A's rank is calculated relative to R, and is at least zero.
 outer/inner R A, direction-label D
 ---------------
-lt-num/var z() rank(D,R,A).
+lt-num/var z (rank D R A).
 
 ; if A is before B, its rank is less
 outer/inner R A,
 outer/inner R B,
 dir D A B,
-value X rank(D,R,A)
+value X (rank D R A)
 ---
-lt-num/var X rank(D,R,B).
+lt-num/var X (rank D R B).
 
 lt-num/var X V,
 lt-num/var Y V,
@@ -25,7 +26,7 @@ not-tight X V.
 lt-num/var X V,
 !not-tight X V
 ---
-value s(X) V.
+value (s X) V.
 
 ; Example:
 ;   AB
@@ -41,3 +42,4 @@ dir h a b,
 dir h c d,
 dir v a c,
 dir v b d.
+#exit

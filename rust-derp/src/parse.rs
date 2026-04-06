@@ -25,6 +25,8 @@ enum Token {
     Slash,
     // two or more consecutive hyphens at token-start position
     RuleSep,
+    Arrow,     // ->  (body on left, head on right)
+    ArrowRev,  // <-  (head on left, body on right)
 }
 
 fn is_id_char(c: char) -> bool {
@@ -45,18 +47,31 @@ fn lex(input: &str) -> Result<Vec<Token>, String> {
             continue;
         }
 
-        // Hyphens: two or more → RuleSep; single → Minus
+        // Hyphens: two or more → RuleSep; -> → Arrow; single → Minus
         if c == '-' {
             if pos + 1 < chars.len() && chars[pos + 1] == '-' {
                 while pos < chars.len() && chars[pos] == '-' {
                     pos += 1;
                 }
                 tokens.push(Token::RuleSep);
+            } else if pos + 1 < chars.len() && chars[pos + 1] == '>' {
+                pos += 2;
+                tokens.push(Token::Arrow);
             } else {
                 pos += 1;
                 tokens.push(Token::Minus);
             }
             continue;
+        }
+
+        // <- → ArrowRev
+        if c == '<' {
+            if pos + 1 < chars.len() && chars[pos + 1] == '-' {
+                pos += 2;
+                tokens.push(Token::ArrowRev);
+                continue;
+            }
+            return Err(format!("unexpected character '<' at byte pos {}", pos));
         }
 
         // Identifiers: start with letter or #, consume id chars greedily
@@ -292,7 +307,7 @@ impl<'a> Parser<'a> {
         let saved = self.pos;
         if let Ok(name) = self.predicate() {
             if name.starts_with('#') {
-                return Ok(apred(Name::Str(name)));
+                return Ok(apred(Name::Special(name[1..].to_string())));
             } else {
                 let sym = self.intern.intern(&name);
                 return Ok(apred(Name::Sym(sym)));
@@ -400,14 +415,49 @@ impl<'a> Parser<'a> {
 
     // -- Rule parser ----------------------------------------------------------
 
+    fn expr_to_tuples(e: Expr) -> PResult<Vec<Tuple>> {
+        match e {
+            Expr::Unit => Ok(vec![]),
+            Expr::Atom(t) => Ok(vec![t]),
+            Expr::Join(a, b) => {
+                let mut ts = Self::expr_to_tuples(*a)?;
+                ts.extend(Self::expr_to_tuples(*b)?);
+                Ok(ts)
+            }
+            other => Err(format!("expected tuple in head position, got {:?}", other)),
+        }
+    }
+
     fn rule(&mut self) -> PResult<Rule> {
-        let body = self.expr()?;
-        self.expect(&Token::RuleSep)?;
-        let heads = self.comma_sep(|p| p.tuple())?;
-        Ok(Rule {
-            body: Closure { ctx: Binding::new(), val: body },
-            head: heads,
-        })
+        let lhs = self.expr()?;
+        match self.peek() {
+            Some(Token::RuleSep) | Some(Token::Arrow) => {
+                self.advance();
+                let heads = self.comma_sep(|p| p.tuple())?;
+                Ok(Rule {
+                    body: Closure { ctx: Binding::new(), val: lhs },
+                    head: heads,
+                })
+            }
+            Some(Token::ArrowRev) => {
+                self.advance();
+                let body = self.expr()?;
+                let heads = Self::expr_to_tuples(lhs)?;
+                Ok(Rule {
+                    body: Closure { ctx: Binding::new(), val: body },
+                    head: heads,
+                })
+            }
+            Some(Token::Dot) | None => {
+                // bare fact: no separator, lhs is the head
+                let heads = Self::expr_to_tuples(lhs)?;
+                Ok(Rule {
+                    body: Closure { ctx: Binding::new(), val: Expr::Unit },
+                    head: heads,
+                })
+            }
+            other => Err(format!("expected rule separator or '.', got {:?} at token pos {}", other, self.pos)),
+        }
     }
 
     // -- Program parser -------------------------------------------------------
@@ -430,17 +480,18 @@ impl<'a> Parser<'a> {
 
 /// Strip comments (text from ';' to end of line)
 fn lex_comments(input: &str) -> String {
-    input
-        .lines()
-        .map(|line| {
-            if let Some(idx) = line.find(';') {
-                &line[..idx]
-            } else {
-                line
-            }
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
+    let mut out = Vec::new();
+    for line in input.lines() {
+        if line.trim() == "#exit" {
+            break;
+        }
+        if let Some(idx) = line.find(';') {
+            out.push(&line[..idx]);
+        } else {
+            out.push(line);
+        }
+    }
+    out.join("\n")
 }
 
 pub fn parse(input: &str, intern: &mut Interner) -> Result<Vec<Rule>, String> {

@@ -3,13 +3,11 @@ use derp::{sym, types, core, parse};
 use std::collections::HashSet;
 use std::env;
 use std::fs;
-use std::io::stdout;
 use std::time::{Duration, Instant};
 
 fn run_with_rules(rules: &[types::Rule], intern: &sym::Interner, timeout: Duration, reorder: bool) -> Result<types::Tuples, Duration> {
     let initial: HashSet<types::Tuple> = HashSet::new();
     let start = Instant::now();
-    // We can't easily interrupt iter_rules, so we just time it
     let (result, _table, _stats) = core::iter_rules(initial, rules.to_vec(), intern, reorder, vec![]);
     let elapsed = start.elapsed();
     if elapsed > timeout {
@@ -67,11 +65,7 @@ fn main() {
     if do_bisect {
         bisect(&rules, &intern, Duration::from_secs(3), reorder);
     } else {
-        let initial: HashSet<types::Tuple> = HashSet::new();
-        let lt_sym = intern.intern("lt");
-        let eq_sym = intern.intern("eq");
-        let index_specs = vec![(lt_sym, 0), (lt_sym, 1), (eq_sym, 0), (eq_sym, 1)];
-        let (result, table, stats) = core::iter_rules(initial, rules, &intern, reorder, index_specs);
+        let (result, table, intern, stats) = derp::eval(&input, reorder);
 
         let base = filename.trim_end_matches(".derp");
         let json_path = format!("{}.json", base);
@@ -88,7 +82,6 @@ fn main() {
 
         eprintln!("{} tuples, wrote {} and {}", result.size(), json_path, derp_path);
 
-        // Collect all predicate names that appear in either map
         let mut preds: Vec<_> = stats.ground.keys().chain(stats.scan.keys()).collect();
         preds.sort();
         preds.dedup();

@@ -1,0 +1,3 @@
+[workspace]
+members = ["rust-derp", "rust-derp-gui", "derp-mcp"]
+resolver = "2"

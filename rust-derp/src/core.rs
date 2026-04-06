@@ -366,6 +366,42 @@ fn eval_flat(
     bs
 }
 
+fn eval_builtin(name: &str, args: &[ATerm], slots: &mut Vec<ATerm>, table: &mut TermTable, check: &Tuples, is_sym: Option<Sym>) -> bool {
+    match name {
+        "lt" => {
+            if args.len() != 2 { return false; }
+            let a = sub_term_compiled(slots, &args[0], table);
+            let b = sub_term_compiled(slots, &args[1], table);
+            match (a.as_ref(), b.as_ref()) {
+                (Term::Num(x), Term::Num(y)) => x < y,
+                _ => false,
+            }
+        }
+        "add" => {
+            if args.len() != 3 { return false; }
+            let a = sub_term_compiled(slots, &args[0], table);
+            let b = sub_term_compiled(slots, &args[1], table);
+            let c = sub_term_compiled(slots, &args[2], table);
+            match (a.as_ref(), b.as_ref(), c.as_ref()) {
+                (Term::Num(x), Term::Num(y), _) => {
+                    let result = Rc::new(Term::Num(x + y));
+                    match_term_compiled(slots, &args[2], &result, check, is_sym, table)
+                }
+                (Term::Num(x), _, Term::Num(z)) => {
+                    let result = Rc::new(Term::Num(z - x));
+                    match_term_compiled(slots, &args[1], &result, check, is_sym, table)
+                }
+                (_, Term::Num(y), Term::Num(z)) => {
+                    let result = Rc::new(Term::Num(z - y));
+                    match_term_compiled(slots, &args[0], &result, check, is_sym, table)
+                }
+                _ => false,
+            }
+        }
+        other => panic!("unknown builtin: #{}", other),
+    }
+}
+
 fn eval_flat0(
     idx: usize,
     slots: &mut Vec<ATerm>,
@@ -384,9 +420,15 @@ fn eval_flat0(
 
     match &expr[idx] {
         Expr::Atom(pat) => {
+            if let Term::Pred(Name::Special(name)) = pat[0].as_ref() {
+                if eval_builtin(name, &pat[1..], slots, table, check, is_sym) {
+                    eval_flat0(idx+1, slots, expr, tuples, check, result, table, stats, is_sym);
+                }
+                return;
+            }
             let pred = match pat[0].as_ref() {
                 Term::Pred(Name::Sym(s)) => *s,
-                _ => panic!("compiled atom must start with Pred"),
+                other => panic!("compiled atom must start with Pred, got {:?}", other),
             };
             let vs = &pat[1..];
             // NOTE: Stale slot values across invocations are safe because the compiler
@@ -438,6 +480,12 @@ fn eval_flat0(
             }
         }
         Expr::NegAtom(pat) => {
+            if let Term::Pred(Name::Special(name)) = pat[0].as_ref() {
+                if !eval_builtin(name, &pat[1..], slots, table, check, is_sym) {
+                    eval_flat0(idx+1, slots, expr, tuples, check, result, table, stats, is_sym);
+                }
+                return;
+            }
             let pred = match pat[0].as_ref() {
                 Term::Pred(Name::Sym(s)) => *s,
                 _ => panic!("compiled atom must start with Pred"),
@@ -517,13 +565,13 @@ pub fn prespecialize(rules: Vec<Rule>, interner: &Interner, reorder: bool) -> (V
         if preds.len() == 0 {
             let mut seen: HashMap<Sym, u16> = HashMap::new();
             let mut next_slot: u16 = 0;
-            let body2 = compile_expr(&rule.body.val, &mut seen, &mut next_slot);
+            let cbody = compile_expr(&rule.body.val, &mut seen, &mut next_slot);
             let chead: Vec<Tuple> = rule.head.iter().map(|tuple| {
                 compile_tuple(tuple, &mut seen, &mut next_slot)
             }).collect();
             immediate.push(SpecEntry {
                 pats: vec![],
-                remaining: body2,
+                remaining: cbody,
                 slots: vec![ablank(); next_slot as usize],
                 head: chead,
             });

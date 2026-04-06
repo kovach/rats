@@ -294,15 +294,6 @@ impl<'a> Parser<'a> {
     }
 
     fn term_primary(&mut self) -> PResult<ATerm> {
-        // Try choice: ?t
-        let saved = self.pos;
-        if self.expect(&Token::Question).is_ok() {
-            if let Ok(inner) = self.term() {
-                return Ok(achoice(inner));
-            }
-            self.pos = saved;
-        }
-
         // Try plain predicate
         let saved = self.pos;
         if let Ok(name) = self.predicate() {

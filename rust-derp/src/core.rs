@@ -142,28 +142,15 @@ pub struct EvalStats {
     pub ground: HashMap<Sym, u64>,
     /// Times match_terms_compiled was called in the scan path (line 315), keyed by predicate sym.
     pub scan: HashMap<Sym, u64>,
+    /// Total iter loop iterations across all passes.
+    pub iter_loops: u64,
 }
 
 impl EvalStats {
     pub fn new() -> Self {
-        EvalStats { ground: HashMap::new(), scan: HashMap::new() }
+        EvalStats { ground: HashMap::new(), scan: HashMap::new(), iter_loops: 0 }
     }
 }
-
-// -- eval_rule ----------------------------------------------------------------
-
-// pub fn eval_rule(rule: &Rule, ts: &Tuples, check: &Tuples, table: &mut TermTable, stats: &mut EvalStats, is_sym: Option<Sym>) -> Vec<Vec<Tuple>> {
-//     let mut results = Vec::new();
-//     let mut slots = vec![ablank(); 30]; // TODO
-//     for final_slots in eval_flat(&mut slots, &rule.body.val.flatten(), ts, check, table, stats, is_sym) {
-//         // Substitute head
-//         let head_tuples: Vec<Tuple> = rule.head.iter().map(|ht| {
-//             sub_terms_compiled(&final_slots, ht, table)
-//         }).collect();
-//         results.push(head_tuples);
-//     }
-//     results
-// }
 
 // -- Compiled expression compilation ------------------------------------------
 
@@ -185,7 +172,6 @@ fn compile_term(t: &ATerm, seen: &mut HashMap<Sym, u16>, next_slot: &mut u16) ->
             let cargs: Vec<ATerm> = args.iter().map(|a| compile_term(a, seen, next_slot)).collect();
             aapp(cons.clone(), cargs)
         }
-        Term::Choice(inner) => achoice(compile_term(inner, seen, next_slot)),
         Term::BinOp(op, l, r) => abinop(
             op.clone(),
             compile_term(l, seen, next_slot),
@@ -228,7 +214,7 @@ fn compile_expr(expr: &Expr, seen: &mut HashMap<Sym, u16>, next_slot: &mut u16) 
 
 fn is_groundable(t: &ATerm) -> bool {
     match t.as_ref() {
-        Term::Var(VarOp::Set(_)) | Term::Blank | Term::Choice(_) => false,
+        Term::Var(VarOp::Set(_)) | Term::Blank => false,
         Term::App(_, args) => args.iter().all(is_groundable),
         Term::BinOp(_, l, r) => is_groundable(l) && is_groundable(r),
         _ => true,
@@ -254,26 +240,8 @@ fn term_is_groundable(vs: &[ATerm], pred: Sym, tuples: &Tuples) -> AtomLookup {
     AtomLookup::None
 }
 
-fn match_term_compiled(slots: &mut Vec<ATerm>, pat: &ATerm, val: &ATerm, check: &Tuples, is_sym: Option<Sym>, table: &TermTable) -> bool {
+fn match_term_compiled(slots: &mut Vec<ATerm>, pat: &ATerm, val: &ATerm, check: &Tuples, table: &TermTable) -> bool {
     // Handle Choice cases before dispatching on pat alone
-    match (pat.as_ref(), val.as_ref()) {
-        (Term::Choice(pt), Term::Choice(vt)) => {
-            return match_term_compiled(slots, pt, vt, check, is_sym, table);
-        }
-        (Term::Choice(_), _) => return false,
-        (_, Term::Choice(key)) => {
-            if let Some(sym) = is_sym {
-                for tuple in check.lookup(&sym) {
-                    if tuple.len() >= 2 && tuple[0] == *key {
-                        let v = &tuple[1];
-                        return match_term_compiled(slots, pat, v, check, is_sym, table);
-                    }
-                }
-            }
-            return false;
-        }
-        _ => {}
-    }
     match pat.as_ref() {
         Term::Var(VarOp::Set(i)) => {
             slots[*i as usize] = val.clone();
@@ -294,7 +262,7 @@ fn match_term_compiled(slots: &mut Vec<ATerm>, pat: &ATerm, val: &ATerm, check: 
             match val_unfolded.as_ref() {
                 Term::App(cons2, args2) if cons == cons2 && args.len() == args2.len() => {
                     for (cp, av) in args.iter().zip(args2.iter()) {
-                        if !match_term_compiled(slots, cp, av, check, is_sym, table) {
+                        if !match_term_compiled(slots, cp, av, check, table) {
                             return false;
                         }
                     }
@@ -304,15 +272,14 @@ fn match_term_compiled(slots: &mut Vec<ATerm>, pat: &ATerm, val: &ATerm, check: 
             }
         }
         Term::Id(_) => panic!("match_term_compiled: Term::Id in pattern position"),
-        Term::Choice(_) => unreachable!("Choice handled above"),
         Term::BinOp(_, _, _) => panic!("match_term_compiled: BinOp in pattern position (should have been evaluated)"),
     }
 }
 
-fn match_terms_compiled(slots: &mut Vec<ATerm>, pattern: &[ATerm], tuple: &[ATerm], check: &Tuples, is_sym: Option<Sym>, table: &TermTable) -> bool {
+fn match_terms_compiled(slots: &mut Vec<ATerm>, pattern: &[ATerm], tuple: &[ATerm], check: &Tuples, table: &TermTable) -> bool {
     if pattern.len() != tuple.len() { return false; }
     for (p, v) in pattern.iter().zip(tuple.iter()) {
-        if !match_term_compiled(slots, p, v, check, is_sym, table) { return false; }
+        if !match_term_compiled(slots, p, v, check, table) { return false; }
     }
     true
 }
@@ -338,7 +305,6 @@ fn sub_term_compiled(slots: &[ATerm], t: &ATerm, table: &mut TermTable) -> ATerm
             table.store(cons.clone(), new_args)
         }
         Term::Id(_) => t.clone(),  // already interned, pass through
-        Term::Choice(inner) => achoice(sub_term_compiled(slots, inner, table)),
         Term::BinOp(op, l, r) => {
             let l2 = sub_term_compiled(slots, l, table);
             let r2 = sub_term_compiled(slots, r, table);
@@ -359,14 +325,13 @@ fn eval_flat(
     check: &Tuples,
     table: &mut TermTable,
     stats: &mut EvalStats,
-    is_sym: Option<Sym>,
 ) -> Vec<Vec<ATerm>> {
     let mut bs = vec![];
-    eval_flat0(0, slots, &expr, tuples, check, &mut bs, table, stats, is_sym);
+    eval_flat0(0, slots, &expr, tuples, check, &mut bs, table, stats);
     bs
 }
 
-fn eval_builtin(name: &str, args: &[ATerm], slots: &mut Vec<ATerm>, table: &mut TermTable, check: &Tuples, is_sym: Option<Sym>) -> bool {
+fn eval_builtin(name: &str, args: &[ATerm], slots: &mut Vec<ATerm>, table: &mut TermTable, check: &Tuples) -> bool {
     match name {
         "lt" => {
             if args.len() != 2 { return false; }
@@ -385,15 +350,15 @@ fn eval_builtin(name: &str, args: &[ATerm], slots: &mut Vec<ATerm>, table: &mut 
             match (a.as_ref(), b.as_ref(), c.as_ref()) {
                 (Term::Num(x), Term::Num(y), _) => {
                     let result = Rc::new(Term::Num(x + y));
-                    match_term_compiled(slots, &args[2], &result, check, is_sym, table)
+                    match_term_compiled(slots, &args[2], &result, check, table)
                 }
                 (Term::Num(x), _, Term::Num(z)) => {
                     let result = Rc::new(Term::Num(z - x));
-                    match_term_compiled(slots, &args[1], &result, check, is_sym, table)
+                    match_term_compiled(slots, &args[1], &result, check, table)
                 }
                 (_, Term::Num(y), Term::Num(z)) => {
                     let result = Rc::new(Term::Num(z - y));
-                    match_term_compiled(slots, &args[0], &result, check, is_sym, table)
+                    match_term_compiled(slots, &args[0], &result, check, table)
                 }
                 _ => false,
             }
@@ -411,7 +376,6 @@ fn eval_flat0(
     result: &mut Vec<Vec<ATerm>>,
     table: &mut TermTable,
     stats: &mut EvalStats,
-    is_sym: Option<Sym>,
 ) {
     if idx == expr.len() {
         result.push(slots.clone());
@@ -421,8 +385,8 @@ fn eval_flat0(
     match &expr[idx] {
         Expr::Atom(pat) => {
             if let Term::Pred(Name::Special(name)) = pat[0].as_ref() {
-                if eval_builtin(name, &pat[1..], slots, table, check, is_sym) {
-                    eval_flat0(idx+1, slots, expr, tuples, check, result, table, stats, is_sym);
+                if eval_builtin(name, &pat[1..], slots, table, check) {
+                    eval_flat0(idx+1, slots, expr, tuples, check, result, table, stats);
                 }
                 return;
             }
@@ -438,23 +402,23 @@ fn eval_flat0(
                     *stats.ground.entry(pred).or_insert(0) += 1;
                     let key = sub_terms_compiled(slots, vs, table);
                     if tuples.contains(pred, &key) {
-                        eval_flat0(idx+1, slots, expr, tuples, check, result, table, stats, is_sym);
+                        eval_flat0(idx+1, slots, expr, tuples, check, result, table, stats);
                     }
                 }
                 AtomLookup::SomeIndex(i) => {
                     let val = sub_term_compiled(slots, &vs[i], table);
                     for stored_tuple in tuples.lookup_col(pred, i, &val) {
                         *stats.scan.entry(pred).or_insert(0) += 1;
-                        if match_terms_compiled(slots, vs, stored_tuple, check, is_sym, table) {
-                            eval_flat0(idx+1, slots, expr, tuples, check, result, table, stats, is_sym);
+                        if match_terms_compiled(slots, vs, stored_tuple, check, table) {
+                            eval_flat0(idx+1, slots, expr, tuples, check, result, table, stats);
                         }
                     }
                 }
                 AtomLookup::None => {
                     for stored_tuple in tuples.lookup(&pred) {
                         *stats.scan.entry(pred).or_insert(0) += 1;
-                        if match_terms_compiled(slots, vs, stored_tuple, check, is_sym, table) {
-                            eval_flat0(idx+1, slots, expr, tuples, check, result, table, stats, is_sym);
+                        if match_terms_compiled(slots, vs, stored_tuple, check, table) {
+                            eval_flat0(idx+1, slots, expr, tuples, check, result, table, stats);
                         }
                     }
                 }
@@ -465,24 +429,24 @@ fn eval_flat0(
             match x.as_ref() {
                 Term::Var(VarOp::Set(i)) => {
                     slots[*i as usize] = y_sub;
-                    eval_flat0(idx+1, slots, expr, tuples, check, result, table, stats, is_sym);
+                    eval_flat0(idx+1, slots, expr, tuples, check, result, table, stats);
                 }
                 Term::Var(VarOp::Check(i)) => {
                     if slots[*i as usize] == y_sub {
-                        eval_flat0(idx+1, slots, expr, tuples, check, result, table, stats, is_sym);
+                        eval_flat0(idx+1, slots, expr, tuples, check, result, table, stats);
                     }
                 }
                 _ => {
-                    if match_term_compiled(slots, x, &y_sub, check, is_sym, table) {
-                        eval_flat0(idx+1, slots, expr, tuples, check, result, table, stats, is_sym);
+                    if match_term_compiled(slots, x, &y_sub, check, table) {
+                        eval_flat0(idx+1, slots, expr, tuples, check, result, table, stats);
                     }
                 }
             }
         }
         Expr::NegAtom(pat) => {
             if let Term::Pred(Name::Special(name)) = pat[0].as_ref() {
-                if !eval_builtin(name, &pat[1..], slots, table, check, is_sym) {
-                    eval_flat0(idx+1, slots, expr, tuples, check, result, table, stats, is_sym);
+                if !eval_builtin(name, &pat[1..], slots, table, check) {
+                    eval_flat0(idx+1, slots, expr, tuples, check, result, table, stats);
                 }
                 return;
             }
@@ -495,20 +459,20 @@ fn eval_flat0(
                 AtomLookup::AllBound => {
                     let substituted: Tuple = sub_terms_compiled(slots, pat, table);
                     if !check.contains_tuple(&substituted) {
-                        eval_flat0(idx+1, slots, expr, tuples, check, result, table, stats, is_sym);
+                        eval_flat0(idx+1, slots, expr, tuples, check, result, table, stats);
                     }
                 }
                 _ => {
                     if !check.lookup(&pred).any(|stored_tuple| {
                         *stats.scan.entry(pred).or_insert(0) += 1;
-                        match_terms_compiled(slots, vs, stored_tuple, tuples, is_sym, table)
+                        match_terms_compiled(slots, vs, stored_tuple, tuples, table)
                     }) {
-                        eval_flat0(idx+1, slots, expr, tuples, check, result, table, stats, is_sym);
+                        eval_flat0(idx+1, slots, expr, tuples, check, result, table, stats);
                     }
                 }
             }
         }
-        Expr::Unit => eval_flat0(idx+1, slots, expr, tuples, check, result, table, stats, is_sym),
+        Expr::Unit => eval_flat0(idx+1, slots, expr, tuples, check, result, table, stats),
         Expr::Join(_, _) => panic!(""),
     }
 }
@@ -636,7 +600,6 @@ pub fn eval_spec_entry(
     result: &mut Vec<Vec<Tuple>>,
     table: &mut TermTable,
     stats: &mut EvalStats,
-    is_sym: Option<Sym>,
 ) {
     let slots = &mut entry.slots;
 
@@ -649,14 +612,14 @@ pub fn eval_spec_entry(
     let mut ok = true;
     let t_rest = &t[1..]; // skip pred
     for cpat in &entry.pats {
-        if !match_terms_compiled(slots, cpat, t_rest, check, is_sym, table) {
+        if !match_terms_compiled(slots, cpat, t_rest, check, table) {
             ok = false;
             break;
         }
     }
     if ok {
         // Eval remaining
-        for final_slots in eval_flat(slots, &entry.remaining.flatten(), ts, check, table, stats, is_sym) {
+        for final_slots in eval_flat(slots, &entry.remaining.flatten(), ts, check, table, stats) {
             // Substitute head
             let head_tuples: Vec<Tuple> = entry.head.iter().map(|ht| {
                 sub_terms_compiled(&final_slots, ht, table)
@@ -676,12 +639,11 @@ pub fn eval1_spec(
     _intern: &Interner,
     table: &mut TermTable,
     stats: &mut EvalStats,
-    is_sym: Option<Sym>,
 ) -> Vec<Vec<Tuple>> {
     let mut results = Vec::new();
 
     for entry in &mut spec.entries {
-        eval_spec_entry(entry, t, ts, check, &mut results, table, stats, is_sym);
+        eval_spec_entry(entry, t, ts, check, &mut results, table, stats);
     }
     results
 }
@@ -702,11 +664,13 @@ pub fn iter(
     table: &mut TermTable,
     stats: &mut EvalStats,
     intern: &Interner,
-    is_sym: Option<Sym>,
 ) -> bool {
     let mut changed = false;
 
-    while let Some(t) = worklist.pop_front() {
+    let mut gas = 100000;
+
+    while let Some(t) = worklist.pop_front() && gas > 0 {
+        gas -= 1;
         if !db.contains_tuple(&t) {
             let new_thunks = {
                 let pred = match t[0].as_ref() {
@@ -717,7 +681,7 @@ pub fn iter(
                     Some(spec_rules) => {
                         let mut results = Vec::new();
                         for spec_rule in spec_rules {
-                            results.extend(eval1_spec(spec_rule, &t, db, check, intern, table, stats, is_sym));
+                            results.extend(eval1_spec(spec_rule, &t, db, check, intern, table, stats));
                         }
                         results
                     }
@@ -735,11 +699,11 @@ pub fn iter(
             db.add_one(&t);
         }
     }
+    if gas <= 0 { panic!("iter gas exhausted") }
 
+    stats.iter_loops += (100000 - gas) as u64;
     changed
 }
-
-// -- altIter (alternating fixpoint for negation) ------------------------------
 
 pub fn alt_iter(
     gas: usize,
@@ -749,41 +713,32 @@ pub fn alt_iter(
     table: &mut TermTable,
     stats: &mut EvalStats,
     intern: &Interner,
-    is_sym: Option<Sym>,
 ) -> Tuples {
     if gas == 0 {
-        panic!("gas exhausted");
+        panic!("alt_iter gas exhausted");
     }
 
     eprintln!("STEP: {}", gas);
 
-    // First forward pass
+    // over approximation of true tuples
     let mut wl1: Worklist = ts0.iter().cloned().collect();
     let mut db1 = v.empty_clone();
-    let _gen1 = iter(specs, &mut wl1, &mut db1, v, v, table, stats, intern, is_sym); // on first run: everything treated as false
-                                                  // yields over-approx of solution
+    let _gen1 = iter(specs, &mut wl1, &mut db1, v, v, table, stats, intern);
 
-    // eprintln!("db1({}): {}", gen1, db1.pp_derp(intern));
-
-    // Second forward pass
-    // Note: we always do pass 2 even when gen1=false, because Choice resolution
-    // uses `check` (the stable previous fixpoint) and needs pass 2 to activate.
+    // under approximation of true tuples
     let mut wl2: Worklist = ts0.iter().cloned().collect();
     let mut db2 = v.empty_clone();
-    let gen2 = iter(specs, &mut wl2, &mut db2, v, &db1, table, stats, intern, is_sym); // anything outside db1 (over-approx) treated as false.
-                                                     // yields under-approx of solution
+    let gen2 = iter(specs, &mut wl2, &mut db2, v, &db1, table, stats, intern);
 
-    // eprintln!("db2({}): {}", gen2, db2.pp_derp(intern));
     if !gen2 { return db2 };
 
-    alt_iter(gas - 1, ts0, specs, &db2, table, stats, intern, is_sym)
+    alt_iter(gas - 1, ts0, specs, &db2, table, stats, intern)
 }
 
 // -- iter_rules --------------------------------------------------
 
 pub fn iter_rules(initial: HashSet<Tuple>, all_rules: Vec<Rule>, intern: &Interner, reorder: bool, index_specs: Vec<(Sym, usize)>) -> (Tuples, TermTable, EvalStats) {
     let (mut start, mut specs) = prespecialize(all_rules, intern, reorder);
-    let is_sym = intern.get("is");
 
     let mut table = TermTable::new();
     let mut stats = EvalStats::new();
@@ -792,7 +747,7 @@ pub fn iter_rules(initial: HashSet<Tuple>, all_rules: Vec<Rule>, intern: &Intern
     // Apply unit-body rules to get initial tuples
     for rule in &mut start {
         let mut ts = Vec::new();
-        eval_spec_entry(rule, &unit_tuple(), &Tuples::new(), &Tuples::new(), &mut ts, &mut table, &mut stats, is_sym);
+        eval_spec_entry(rule, &unit_tuple(), &Tuples::new(), &Tuples::new(), &mut ts, &mut table, &mut stats);
         for hts in ts {
             for t in hts {
                 ts0.insert(t);
@@ -801,7 +756,7 @@ pub fn iter_rules(initial: HashSet<Tuple>, all_rules: Vec<Rule>, intern: &Intern
     }
 
     let template = Tuples::with_indices(index_specs);
-    let tuples = alt_iter(10, &ts0, &mut specs, &template, &mut table, &mut stats, intern, is_sym);
+    let tuples = alt_iter(10, &ts0, &mut specs, &template, &mut table, &mut stats, intern);
     (tuples, table, stats)
 }
 

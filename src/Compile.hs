@@ -3,7 +3,8 @@
 {-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE ConstraintKinds #-}
-module Compile (main1, main1', main2, main3, parseOne) where
+--module Compile (main1, main1', main2, main3, parseOne) where
+module Compile  where
 
 import Prelude hiding (pred, exp, take)
 import Control.Monad.Writer
@@ -667,23 +668,12 @@ main3 = do
 data Token = Token String deriving (Eq, Ord, Show)
 token "" = []
 token acc = [Token $ reverse acc]
-pickToken' sp acc "" = token acc
+pickToken' _sp acc "" = token acc
 pickToken' sp acc s | Just (t, s') <- sp s = (token acc) <> [t] <> pickToken' sp "" s'
 pickToken' sp acc (c:s') | isSpace c = token acc <> pickToken' sp "" s'
 pickToken' sp acc (c:s') = pickToken' sp (c:acc) s'
 pickToken sp s = pickToken' sp "" s
 tokenize sp s = pickToken sp s
-
-pickOne "" = Nothing
-pickOne s = let (t, r) = break isSpace s in Just (Token t, drop 1 r)
-startSpecial :: String -> Maybe (Token, String)
-startSpecial (a:b:r) | Just _ <- isEndpointJoin a b = Just (Token [a,b], r)
-startSpecial s | Just r <-
-    case mapMaybe (\t -> stripPrefix t s >>= \s' -> pure (t, s')) specialTokens of
-      [(t,s')] -> Just (Token t, s')
-      _ -> Nothing
-  = Just r
-startSpecial _ = Nothing
 
 specialTokens =
   [ "."
@@ -692,6 +682,7 @@ specialTokens =
   , "<="
   , ","
   , "+"
+  , "="
   , "~" ]
 endpointMarkers :: [(Char, EndpointCmp)]
 endpointMarkers = zip "~=<>" [ECNone, ECEq, ECLt, ECGt]
@@ -700,13 +691,22 @@ isEndpointJoin a b = do
   bv <- lookup b endpointMarkers
   pure (av, bv)
 
+startSpecial :: String -> Maybe (Token, String)
+startSpecial (a:b:r) | Just _ <- isEndpointJoin a b = Just (Token [a,b], r)
+startSpecial s =
+  case mapMaybe (\t -> (t,) <$> stripPrefix t s) specialTokens of
+    [(t,s')] -> Just (Token t, s')
+    [] -> Nothing
+    _ -> error "internal error: tokenizer ambiguity"
+
 data JoinOp = Binary EndpointCmp EndpointCmp | Fixed String
   deriving (Eq, Show)
 
 toJoinOp :: String -> Maybe JoinOp
 toJoinOp = \case
   "," -> Just $ Fixed ","
-  "~" -> Just $ Fixed "~"
+  "~" -> Just $ Binary ECNone ECNone
+  "=" -> Just $ Binary ECEq ECEq
   "/" -> Just $ Fixed "/"
   [a,b] | Just (l,r) <- isEndpointJoin a b -> Just $ Binary l r
   _ -> Nothing
@@ -716,81 +716,99 @@ data E'
   | Join JoinOp E' E'
   | TVar CS.Var
   | TPred CS.Pred
+  | Bang String
   deriving (Eq, Show)
 
-efix (CS.Term a) = a
-instance OfItem E' where
-  finish [CS.Term (TPred p), (CS.Term x), (CS.Term y)] ty | ty == _te, Just op <- toJoinOp p = Join op x y
-  finish (CS.Term (TPred p) : ts) ty | ty == _te = Leaf (TPred p : map efix ts)
-  finish [CS.Term (TVar v)] ty | ty == _t = TVar v
-  finish [CS.Term (TPred p)] ty | ty == _t = TPred p
-  finish ts _ = error $ show ts
-  mkVar v = TVar v
-  mkPred p = TPred p
-
-type Schema = CS.Pred -> [Arity]
+instance PP E' where pp = show
+type Schema = CS.Pred -> [CS.ItemTy]
 predArity :: CS.Pred -> Int
 predArity s = (+1) . length . filter (== '/') $ s
 -- TODO: how safe is this? allow `foo` to refer to both nullary and unary predicates
-specialArity p = do
-  n <- case drop 1 p of
-    "move" -> Just 2
-    "at" -> Just 2
-    "is" -> Just 2
-    _ -> Nothing
-  pure $ replicate n _t
+-- TODO: also try fully ambiguity
+isInfix p = p `elem` ["move", "at", "set", "is"]
 
+_nullary = CS.ItemTy { tLeft = [], tRight = [], tResult = _te }
+_n_ary n = CS.ItemTy { tLeft = [], tRight = replicate n _t, tResult = _te }
+_infix = CS.ItemTy { tLeft = [_t], tRight = [_t], tResult = _te }
 defaultSchema :: Schema
-defaultSchema p | Just t <- specialArity p = [t]
+defaultSchema p | isInfix p = [_infix]
 defaultSchema p =
   let n = predArity p in
-      if n == 1 then [[], [_t]] else [replicate n _t]
+      case n of
+        1 -> [_n_ary 0, _n_ary 1]
+        2 -> [_infix]
+        _ -> [_n_ary n]
+      -- if n == 1 then [[], [_t]] else [replicate n _t]
 
+--termOfString = CS.Term . mkPred
+termOfString = ItemPred
 -- assign an item type to each token
 itemize :: Schema -> Token -> Item E'
 itemize _s (Token "(") = ItemPush
 itemize _s (Token ")") = ItemPop
 itemize _s (Token "_") = ItemHole
+
 itemize _s (Token pr) | Just _ <- toJoinOp pr = _join $ mkPred pr
-itemize _s (Token s@(x : _)) | isUpper x = _var $ mkVar s
-itemize _s (Token s@('_' : _))           = _var $ mkVar s
-itemize  s (Token p@('?' : _)) = Items [ ItemAtom [] [CS.Term $ mkPred p] ar _te | ar <- s p ]
-itemize  s (Token p@('!' : _)) = Items [ ItemAtom [] [CS.Term $ mkPred p] ar _te | ar <- s p ]
-itemize _s (Token p@(_ : _)) = ItemAtom [] [CS.Term $ mkPred p] [] _t
+itemize _s (Token "+")                        = ItemFn (TPred "+") (ItemTy [_t] _te [_t, _t]) -- ItemAtom [] [termOfString "+"] [_t, _t, _t] _te
+itemize _s (Token s@(x : _)) | isUpper x      = _var $ mkVar s
+itemize _s (Token s@('_' : _))                = _var $ mkVar s
+itemize _s (Token (':' : p))                  = termOfString p -- ItemAtom [] [termOfString p] [] _t
+itemize  s (Token ('!' : p))                  =
+  Items [ ItemFn (Bang p) (ItemTy l out r) | (CS.ItemTy l out r) <- s p ]
+  --Items [ ItemAtom [] [termOfString "!", termOfString p] ar _te | ar <- s p ]
+itemize  s (Token p@(_ : _))                  =
+  Items [ ItemFn (TPred p) (ItemTy l out r) | (CS.ItemTy l out r) <- s p ]
+  --Items [ ItemAtom [] [termOfString p] ar _te | ar <- s p ]
 itemize _s (Token []) = error "empty word"
 
--- GOALS
--- * parse a query (just vars)
--- * add ! to itemizer
--- * compile something
--- * split on '.'
--- * run something
--- - add the rest of Term
+--instance OfItem E' where
+--  finish [CS.Term (TPred p), (CS.Term x), (CS.Term y)] ty | ty == _te, Just op <- toJoinOp p = Join op x y
+--  finish (CS.Term (TPred p) : ts) ty | ty == _te = Leaf (TPred p : map efix ts)
+--  finish [CS.Term (TVar v)] ty | ty == _t = TVar v
+--  finish [CS.Term (TPred p)] ty | ty == _t = TPred p
+--  finish ts _ = error $ show ts
+--  mkVar v = TVar v
+--  mkPred p = TPred p
+
+instance OfItem E' where
+  finish (ty, [x, y], (TPred op)) | ty == _te, Just op' <- toJoinOp op = Join op' x y
+  finish (ty, ts, (TPred p)) | ty == _te = Leaf (TPred p : ts)
+  finish (ty, [], (TVar v)) | ty == _t = TVar v
+  finish (ty, [], (TPred p)) | ty == _t = TPred p
+  finish t = error $ show t
+  mkVar = TVar
+  mkPred = TPred
+
+
 turnConvert :: E' -> E
 turnConvert = \case
-    Leaf (TPred ('?' : name) : rest) -> Atom (Pattern AtomFree NoVars (map fix $ TPred name : rest))
-    Leaf (TPred ('!' : name) : rest) -> Atom (Pattern AtomPos  NoVars (map fix $ TPred name : rest))
+    Leaf (TPred "!" : TPred name : rest) -> Atom (Pattern AtomPos  NoVars (map fix $ TPred name : rest))
+    Leaf (TPred ( name) : rest) -> Atom (Pattern AtomFree NoVars (map fix $ TPred name : rest))
     Join (Fixed ",") a b -> And (turnConvert a) (turnConvert b)
+    Join (Fixed "/") a b -> Over (turnConvert a) (turnConvert b)
     Join (Binary l r) a b -> GenAnd l r (turnConvert a) (turnConvert b)
-    _ -> error "unreachable?"
+    e -> error $ "1) unreachable?" <> show e
   where
     fix = \case
       TVar v -> TermVar $ FreeVar v
       TPred p -> TermPred $ Pred p
-      _ -> error "unreachable?"
+      t -> error $ "2) unreachable?" <> show t
 
 firstSuccess parses =
     case mapMaybe s1 parses of
       [e] -> e
-      _ -> error $ "bad parse: " <> show parses
+      _ -> error $ "bad parse: " <> unlines (map err parses)
   where
-    s1 (Success1 _ e) = Just e
+    s1 (Right e) = Just e
+    --s1 (Success1 _ e) = Just e
     s1 _ = Nothing
+    err (Left e) = e
 --firstSuccess [Success1 _ e] = e
 --firstSuccess [Error e _] = error e
 
 splitRules :: [Token] -> [[Token]]
 splitRules = filter (not . null) . splitOn [Token "."]
+
 parseCS :: String -> [E]
 parseCS = map convert . splitRules . tokenize startSpecial
   where

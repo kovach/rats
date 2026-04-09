@@ -13,7 +13,7 @@ import qualified Data.Map as Map
 import qualified MMap as MMap
 import MMap (MMap)
 
-class PP a where
+class Show a => PP a where
   pp  :: a -> String
 
 instance (PP a, PP b) => PP (a, b) where

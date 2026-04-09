@@ -108,6 +108,7 @@ pattern Lt a b = Cmp OpLt a b
 pattern Eql a b = Cmp OpEq a b
 
 data TRule = TRule { trName :: Name, trE :: E }
+  deriving Show
 
 trMap f (TRule n e) = TRule n (f e)
 
@@ -227,6 +228,9 @@ instance PP E where
   pp (SameNot a b) = pwrap $ pp a <> " ~¬ " <> pp b
 instance PP TRule where
   pp (TRule n e) = n <> ": " <> pp e <> "."
+instance PP Statement where
+  pp (RuleStatement mname e) = maybe "" (pp .> (<> ": ")) mname <> pp e
+  pp (Pragma p) = '#' : pp p -- todo
 
 tryPred = "try__"
 chosePred = "chose__"

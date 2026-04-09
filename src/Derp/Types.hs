@@ -40,7 +40,7 @@ data E
 pattern SpecialAtom p ts = Atom (TermPred ('#' : p) : ts)
 
 newtype Tuples = Tuples (MMap.MMap Pred (Set Tuple))
-  deriving (Semigroup, Monoid)
+  deriving (Show, Semigroup, Monoid)
 
 -- TODO: bdeps unused
 data Binding = Binding { bind :: B.Binding Name Term, bdeps :: [Tuple] }

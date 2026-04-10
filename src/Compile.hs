@@ -849,5 +849,5 @@ asdf = go
     one (Token s@(x : _)) | isUpper x = UV s
     one (Token "*")                   = UH
     one (Token s@('_' : _))           = UV s
-    one (Token p@(_ : _))             = UA p (predArity p) []
+    one (Token p@(_ : _))             = UA p (predArity p) [] []
     one (Token [])                    = error "empty word"

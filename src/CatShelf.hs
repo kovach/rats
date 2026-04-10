@@ -516,7 +516,7 @@ tests' =
   , "a (*/b B x/x/x */c c)"
   , "a (/b b x/x/x /c c)"
   , "a (*/b B x/x/x */c c/d d/e e)"
-  , "q (p p/q)" -- not giving the desired result
+  , "q (p p/q)"
   ]
 
 printParseResult (Error e _) = putStrLn $ e <> "\n"
@@ -525,7 +525,7 @@ printParseResult (Success1 q t) = putStrLn $ show t <> "\n" <> unlines (map show
 
 cr (h : t) = t <> [h]
 cr [] = []
-data Ut = UA Pred Int [Ut] | UV Var | UH | UP Ut Ut | UNil
+data Ut = UA Pred Int [Ut] [Ut] | UV Var | UH | UP Ut Ut | UNil
   deriving (Eq, Show)
 isLeaf UH = True
 isLeaf UV{} = True
@@ -534,8 +534,7 @@ isLeaf UNil = True
 isLeaf UP{} = False
 tr f t | isLeaf t = tell $ f t
 tr f (UP l r) = tr f l >> tr f r
-tr f (UA _ _ ts) = mapM_ (tr f) ts
-
+tr f (UA _ _ ls rs) = mapM_ (tr f) (ls <> rs)
 uvs :: Ut -> [Var]
 uvs = execWriter . tr f
   where
@@ -547,9 +546,9 @@ il x (UP l r) =
   case il x l of
     Just l' -> Just $ UP l' r
     Nothing -> UP l <$> il x r
-il _ (UA _ 0 _) = Nothing
-il UH (UA p n ts) = Just $ UA p n (UH : ts)
-il x (UA p n ts) = Just $ UA p (n-1) (x : ts)
+il _ (UA _ 0 _ _) = Nothing
+il UH (UA p n ls rs) = Just $ UA p n (UH : ls) rs
+il x  (UA p n ls rs) = Just $ UA p (n-1) (x : ls) rs
 il _ UV{} = error ""
 il _ UH{} = error ""
 il l UNil = error $ show l
@@ -559,9 +558,9 @@ ir x (UP l r) =
   case ir x r of
     Just r' -> Just $ UP l r'
     Nothing -> flip UP r <$> ir x l
-ir _ (UA _ 0 _) = Nothing
-ir UH (UA p n ts) = Just $ UA p n (ts <> [UH])
-ir x (UA p n ts) = Just $ UA p (n-1) (ts <> [x])
+ir _ (UA _ 0 _ _) = Nothing
+ir UH (UA p n ls rs) = Just $ UA p n ls (UH : rs)
+ir x  (UA p n ls rs) = Just $ UA p (n-1) ls (x : rs)
 ir _ UV{} = error ""
 ir _ UH{} = error ""
 ir _ UNil = error ""
@@ -582,16 +581,16 @@ instance Monoid Ut where
 
 stepR (UP l r) | Just k <- stepR r = Just (UP l . k)
 stepR (UP l r) | Just k <- stepR l = Just (flip UP r . k)
-stepR (UA p i ts) | i > 0 = Just (\v -> UA p (i-1) (ts <> [v]))
+stepR (UA p i ls rs) | i > 0 = Just $ \v -> UA p (i-1) ls (v : rs)
 stepR _ = Nothing
 
 stepL (UP l r) | Just k <- stepL l = Just (flip UP r . k)
 stepL (UP l r) | Just k <- stepL r = Just (UP l . k)
-stepL (UA p i ts) | i > 0 = Just (\v -> UA p (i-1) (v:ts))
+stepL (UA p i ls rs) | i > 0 = Just $ \v -> UA p (i-1) (v:ls) rs
 stepL _ = Nothing
 
 simpl (UP l r) = UP (simpl l) (simpl r)
-simpl (UA p i ts) = UA p i (fix ts)
+simpl (UA p i ls rs) = UA p i (fix ls) (fix rs)
   where
     fix (UH : vs) = cr $ fix vs
     fix (v : vs) = v : fix vs
@@ -606,7 +605,7 @@ newJoin = simpl . solve . foldl' UP UNil
 
 instance PP Ut where
   pp (UP l r) = pp l <> " " <> pp r
-  pp (UA p i ts) = (if i > 0 then "[!"<>show i<>"]" else "") <> pwrap (unwords (p : map pp ts))
+  pp (UA p i ls rs) = (if i > 0 then "[!"<>show i<>"]" else "") <> pwrap (unwords (p : map pp (reverse ls <> rs)))
   pp (UV v) = v
   pp (UH) = "*"
   pp UNil = "."

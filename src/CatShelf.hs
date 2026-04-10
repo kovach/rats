@@ -9,10 +9,13 @@ module CatShelf
   , Pred, Var
   , Item(..), Ty(..)
   , ParseResult(..)
-  -- todo remove
-  , itemTy , isClosed, NormalTy(..)
-  , exposeL, exposeR
   , tests
+  -- todo remove
+  , itemTy , isClosed, NormalTy(..) , newJoin
+  , exposeL, exposeR
+  , Ut(..)
+  , uvs
+  , tests'
   ) where
 
 import Control.Monad (guard)
@@ -38,7 +41,7 @@ import Debug.Trace
 
 import Prelude hiding (Word)
 import Control.Monad.State
-import Control.Monad.Writer (WriterT, runWriterT, tell)
+import Control.Monad.Writer (WriterT, runWriterT, tell, execWriter, Writer)
 import Control.Monad.Except
 import Data.Char
 import Data.Function ((&))
@@ -502,6 +505,108 @@ tests =
   , "p (/foo F + /bar b)"
   ]
 
+tests' =
+  [ "a a/b b/c c"
+  , "a (a/b b)"
+  , "(x/x/x a b c)"
+  , "a (b x/x/x c)"
+  , "a (x/x/x b c)"
+  , "a (x/x/x b c)"
+  , "a (*/b B x/x/x c)"
+  , "a (*/b B x/x/x */c c)"
+  , "a (/b b x/x/x /c c)"
+  , "a (*/b B x/x/x */c c/d d/e e)"
+  , "q (p p/q)" -- not giving the desired result
+  ]
+
 printParseResult (Error e _) = putStrLn $ e <> "\n"
 printParseResult (Success0 q) = putStrLn $ unlines (map show q)
 printParseResult (Success1 q t) = putStrLn $ show t <> "\n" <> unlines (map show q)
+
+cr (h : t) = t <> [h]
+cr [] = []
+data Ut = UA Pred Int [Ut] | UV Var | UH | UP Ut Ut | UNil
+  deriving (Eq, Show)
+isLeaf UH = True
+isLeaf UV{} = True
+isLeaf UA{} = False
+isLeaf UNil = True
+isLeaf UP{} = False
+tr f t | isLeaf t = tell $ f t
+tr f (UP l r) = tr f l >> tr f r
+tr f (UA _ _ ts) = mapM_ (tr f) ts
+
+uvs :: Ut -> [Var]
+uvs = execWriter . tr f
+  where
+    f (UV v) = [v]
+    f _ = []
+fr t = UV $ fromJust $ find (not . (`elem` (uvs t))) [ "x" <> show i | i <- [0..] ]
+
+il x (UP l r) =
+  case il x l of
+    Just l' -> Just $ UP l' r
+    Nothing -> UP l <$> il x r
+il _ (UA _ 0 _) = Nothing
+il UH (UA p n ts) = Just $ UA p n (UH : ts)
+il x (UA p n ts) = Just $ UA p (n-1) (x : ts)
+il _ UV{} = error ""
+il _ UH{} = error ""
+il l UNil = error $ show l
+-- todo allow?
+
+ir x (UP l r) =
+  case ir x r of
+    Just r' -> Just $ UP l r'
+    Nothing -> flip UP r <$> ir x l
+ir _ (UA _ 0 _) = Nothing
+ir UH (UA p n ts) = Just $ UA p n (ts <> [UH])
+ir x (UA p n ts) = Just $ UA p (n-1) (ts <> [x])
+ir _ UV{} = error ""
+ir _ UH{} = error ""
+ir _ UNil = error ""
+
+isTerm UH = True
+isTerm UV{} = True
+isTerm _ = False
+instance Semigroup Ut where
+  UNil <> x = x
+  x <> UNil = x
+  u <> v | isTerm v = fromJust $ ir v u
+  v <> u | isTerm v = fromJust $ il v u
+  u <> v | Just kl <- stepR u, Just kr <- stepL v =
+      let x = fr (UP u v) in UP (kl x) (kr x)
+  x <> y = UP x y
+instance Monoid Ut where
+  mempty = UNil
+
+stepR (UP l r) | Just k <- stepR r = Just (UP l . k)
+stepR (UP l r) | Just k <- stepR l = Just (flip UP r . k)
+stepR (UA p i ts) | i > 0 = Just (\v -> UA p (i-1) (ts <> [v]))
+stepR _ = Nothing
+
+stepL (UP l r) | Just k <- stepL l = Just (flip UP r . k)
+stepL (UP l r) | Just k <- stepL r = Just (UP l . k)
+stepL (UA p i ts) | i > 0 = Just (\v -> UA p (i-1) (v:ts))
+stepL _ = Nothing
+
+simpl (UP l r) = UP (simpl l) (simpl r)
+simpl (UA p i ts) = UA p i (fix ts)
+  where
+    fix (UH : vs) = cr $ fix vs
+    fix (v : vs) = v : fix vs
+    fix [] =[]
+simpl x = x
+
+solve (UP l r) = solve l <> solve r
+solve x = x
+
+newJoin :: [Ut] -> Ut
+newJoin = simpl . solve . foldl' UP UNil
+
+instance PP Ut where
+  pp (UP l r) = pp l <> " " <> pp r
+  pp (UA p i ts) = (if i > 0 then "[!"<>show i<>"]" else "") <> pwrap (unwords (p : map pp ts))
+  pp (UV v) = v
+  pp (UH) = "*"
+  pp UNil = "."

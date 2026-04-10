@@ -673,8 +673,10 @@ pickToken' sp acc s | Just (t, s') <- sp s = (token acc) <> [t] <> pickToken' sp
 pickToken' sp acc (c:s') | isSpace c = token acc <> pickToken' sp "" s'
 pickToken' sp acc (c:s') = pickToken' sp (c:acc) s'
 pickToken sp s = pickToken' sp "" s
+tokenize :: (String -> Maybe (Token, String)) -> String -> [Token]
 tokenize sp s = pickToken sp s
 
+specialTokens :: [String]
 specialTokens =
   [ "."
   , "("
@@ -683,7 +685,8 @@ specialTokens =
   , ","
   , "+"
   , "="
-  , "~" ]
+  , "~"
+  , "*" ]
 endpointMarkers :: [(Char, EndpointCmp)]
 endpointMarkers = zip "~=<>" [ECNone, ECEq, ECLt, ECGt]
 isEndpointJoin a b = do
@@ -828,3 +831,23 @@ parseCS = map convert . splitRules . tokenize startSpecial
 
 parseOne :: String -> [Statement]
 parseOne input = map (RuleStatement Nothing) (parseCS input)
+
+oneUt = foldl' UP UNil
+
+fx = newJoin . asdf . tokenize (\(x:r) -> if [x] `elem` specialTokens then Just (Token [x], r) else Nothing)
+asdf = go
+  where
+
+    go  (Token "(" : r) =
+      case span (/= Token ")") r of
+        (xs, Token ")" : r') -> oneUt (go xs) : go r'
+        _ -> error ""
+    go (x : r) =
+      one x : go r
+    go [] = []
+    one (Token ")") = error "unmatched ')'"
+    one (Token s@(x : _)) | isUpper x = UV s
+    one (Token "*")                   = UH
+    one (Token s@('_' : _))           = UV s
+    one (Token p@(_ : _))             = UA p (predArity p) []
+    one (Token [])                    = error "empty word"

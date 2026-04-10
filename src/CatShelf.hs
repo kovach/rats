@@ -5,16 +5,20 @@
 module CatShelf
   ( OfItem, finish, mkVar, mkPred, Term(..)
   , parse, runCatShelf
-  , _t, _te, _join, _comma, _var
+  , _t, _te, _join, _comma, _var, _infix, _infixTy
   , Pred, Var
-  , Item(..), ItemTy(..)
+  , Item(..), Ty(..)
   , ParseResult(..)
   -- todo remove
-  , itemTy , isClosed
-  , Arity, Ty ) where
+  , itemTy , isClosed, NormalTy(..)
+  , exposeL, exposeR
+  , tests
+  ) where
 
 import Control.Monad (guard)
 import Basic
+import Data.Function (on)
+import Debug.Trace
 
 -- TODO dead code
 
@@ -46,8 +50,6 @@ import Text.Read (readMaybe)
 type Pred = String
 type Var = String
 
-data Ty = Ty String deriving (Eq, Show, Ord)
-type Arity = [Ty]
 data Term a = Term a
   deriving (Eq, Show, Ord)
 data Atom a = Atom Pred [Term a]
@@ -57,29 +59,31 @@ data Word a = WTerm (Term a) | WPred Pred | WPush | WPop | WHole
 
 type ItemStack a = Stack (Item a)
 
-data ItemTy = ItemTy { tLeft :: [Ty], tResult :: Ty, tRight :: [Ty] }
-  deriving (Show, Eq)
+data Ty = Ty String
+        -- a \\ b = given a on left, has type b
+        | ArrowLeft Ty Ty
+        -- b // a = given a on right, has type b
+        | ArrowRight Ty Ty
+  deriving (Eq, Show, Ord)
+
+data NormalTy = ItemTy { tLeft :: [Ty], tResult :: Ty, tRight :: [Ty] }
+  deriving (Eq, Show, Ord)
 
 type T a = Item a
 data Item a
-  -- a partially applied atom with `Arity` missing arguments.
-  = ItemAtom
-    { todo :: ItemStack a
-    , have :: [Term a]
-    , wantLeft :: Arity
-    , wantRight :: Arity
-    , resultType :: Ty }
-  | ItemHole
-
+  = ItemHole
   | Items [Item a] | ItemPush | ItemPop
 
-  | ItemFn a ItemTy
+  -- | ItemFn a Ty
+  | ItemCons a Ty
+  | MacroAnd Ty
+  | ItemAbsL Ty (Item a)
+  | ItemAbsR (Item a) Ty
   | ItemAppLeft (T a) (Item a)
   | ItemAppRight (Item a) (T a)
   | ItemTodo (Item a) (ItemStack a)
-  | ItemVar Var
+  | ItemVar Var Ty
   | ItemPred Pred
-  | Foo a
   deriving (Show, Eq)
 
 instance OfItem a => IsString (Term a) where
@@ -88,10 +92,12 @@ instance OfItem a => IsString (Term a) where
 -- lexicon
 _t = Ty "term"
 _te = Ty "turn-expr"
-_join op = ItemFn op (ItemTy [_te] _te [_te] )
+_infix op l o r = ItemAbsL l $ ItemAbsR (ItemCons op o) r
+_infixTy l o r = ArrowLeft l $ ArrowRight o r
+_join op = _infix op _te _te _te
 _comma :: OfItem a => Item a
 _comma = _join (mkPred ",")
-_var v = ItemFn (v) (ItemTy [] _t [])
+_var v ty = ItemVar v ty -- ItemFn (v) (ItemTy [] _t [])
 
 --holeSymbol = "."
 --hole :: OfItem a => a
@@ -114,15 +120,18 @@ instance PP a => PP (Item a) where
   pp (Items ts) = "[" <> intercalate " | " (map pp ts) <> "]"
   pp ItemPush = "push"
   pp ItemPop = "pop"
-  pp (ItemFn c (ItemTy l o r)) = pp c -- pwrap $ pp c <> ":" <> pp l <> pp o <> pp r
   pp (ItemAppLeft t i) = pp t <> "\\" <> pp i
   pp (ItemAppRight i t) = pp i <> "/" <> pp t
-  pp (ItemTodo x r) = pp x <> bwrap (pp r)
-  pp (ItemVar v) = v
+  pp (ItemTodo x r) = pp x <> brwrap (pp r)
+  pp (ItemVar v _) = v
   pp (ItemPred p) = p
   pp (ItemHole) = "_"
-  pp (ItemAtom {}) = error "todo remove"
-  pp (Foo _) = error "todo remove foo"
+  pp (ItemCons c _) = pp c
+  --pp (ItemAbsL ty i) = pwrap $ pp ty <> "\\\\" <> pp i
+  pp (ItemAbsL _ty i) = pp i
+  --pp (ItemAbsR i ty) = pwrap $ pp i <> "//" <> pp ty
+  pp (ItemAbsR i _ty) = pp i
+  pp (MacroAnd _) = "+"
 
 fresh' :: (MonadState Int m) => m Var
 fresh' = do
@@ -178,51 +187,80 @@ type M a = ExceptT String (StateT Int []) a
 --      ItemTodo i s -> _
 --      _ -> error "unreachable"
 
+pushL x (ItemTy l t r) = ItemTy (x:l) t r
+pushR x (ItemTy l t r) = ItemTy l t (x:r)
 
-termTy = ItemTy  [] _t []
-itemTy (ItemFn _ ty) = Just ty
+tyNormalize (Ty s) = ItemTy [] (Ty s) []
+tyNormalize (ArrowLeft l r) = pushL l (tyNormalize r)
+tyNormalize (ArrowRight l r) = pushR r (tyNormalize l)
+
+-- conflate "mono-sided" arrow types
+teq x y = normal x == normal y
+  where
+    normal (ItemTy [] t r) = ([], r, t)
+    normal (ItemTy l t []) = ([], l, t)
+    normal (ItemTy l t r)  = (l, r, t)
+
+teqn = on teq tyNormalize
+
+exposeL Ty{} = Nothing
+exposeL (ArrowLeft ty t) = Just (ty, t)
+exposeL (ArrowRight t tr) = do
+  (tl, t') <- exposeL t
+  pure (tl, ArrowRight t' tr)
+exposeR Ty{} = Nothing
+exposeR (ArrowRight t ty) = Just (ty, t)
+exposeR (ArrowLeft tl t) = do
+  (tr, t') <- exposeR t
+  pure (tr, ArrowLeft tl t')
+itemTy :: T a -> Maybe Ty
 itemTy (ItemAppLeft il ir) = do
-  (ItemTy [] t []) <- itemTy il
-  (l, rest) <- bindsLeft ir
-  guard $ t == l
+  ty <- itemTy il
+  (ty', rest) <- exposeL =<< itemTy ir
+  guard (ty `teqn` ty')
   pure rest
 itemTy (ItemAppRight il ir) = do
-  (r, rest) <- bindsRight il
-  (ItemTy [] t []) <- itemTy ir
-  guard $ t == r
+  ty <- itemTy ir
+  (ty', rest) <- exposeR =<< itemTy il
+  guard $ ty' `teqn` ty
   pure rest
 itemTy (Items is) = do
   (ty : types) <- mapM itemTy is
   guard $ all (ty ==) types
   pure ty
-itemTy ItemHole = pure $ termTy
+itemTy ItemHole = pure $ _t
 -- as we're parsing, we care about the type of i (the active item)
 -- ultimately this item will have a different effect on the stack
 itemTy (ItemTodo i _) = itemTy i
 itemTy ItemPush = Nothing
 itemTy ItemPop = Nothing
-itemTy i = error $ "todo remove: " <> show i -- todo remove other cases
+itemTy (ItemCons _ ty) = Just ty
+itemTy (ItemAbsL ty x) = ArrowLeft ty <$> itemTy x
+itemTy (ItemAbsR x ty) = flip ArrowRight ty <$> itemTy x
+itemTy (ItemVar _ ty) = Just ty
+itemTy (ItemPred _) = Just _t
+itemTy (MacroAnd ty) = Just ty
 
-appR item t | Just (ItemTy _ _o []) <- itemTy item = ItemAppLeft t item
+itemNormTy = (tyNormalize <$>) . itemTy
+
+appR item t | Just (ItemTy _ _o []) <- itemNormTy item = ItemAppLeft t item
 appR item t = ItemAppRight item t
-appL t item | Just (ItemTy [] _o _) <- itemTy item = ItemAppRight item t
+appL t item | Just (ItemTy [] _o _) <- itemNormTy item = ItemAppRight item t
 appL t item = ItemAppLeft t item
 
 bindsRight item =
-  case itemTy item of
-    -- Nothing -> error $ "mistyped: " <> show item
+  case itemNormTy item of
     Just (ItemTy l o (t:r)) -> Just (t, ItemTy l o r)
     Just (ItemTy (t : l) o []) -> Just (t, ItemTy l o [])
     _ -> Nothing
 bindsLeft item =
-  case itemTy item of
-    -- Nothing -> error $ "mistyped: " <> show item
+  case itemNormTy item of
     Just (ItemTy (t:l) o r) -> Just (t, ItemTy l o r)
     Just (ItemTy [] o (t : r)) -> Just (t, ItemTy [] o r)
     _ -> Nothing
 
 isClosed item = do
-  (ItemTy [] t []) <- itemTy item
+  (ItemTy [] t []) <- itemNormTy item
   pure t
 
 resolve :: Item a -> Maybe (ItemStack a, Item a)
@@ -244,17 +282,28 @@ resolve = \case
   --Items _ -> error "no"
   --_ -> error "todo"
 
-flattenItem :: ParseTo a => Item a -> a
-flattenItem i | Just (ItemTy [] o []) <- itemTy i = finish (o, map flattenItem is, x)
+macroApply :: ParseTo a => Item a -> Maybe (Item a)
+macroApply i = go [] i
   where
-    (is, x) = go [] [] i
-    go l r = \case
-      ItemFn a _ -> (reverse l <> r, a)
-      ItemAppLeft t i' -> go (t:l) r i'
-      ItemAppRight i' t -> go l (t:r) i'
+    -- (is, x) = go [] [] i
+    Just ty = itemTy i
+    go acc = \case
+      MacroAnd _ ->
+        case acc of
+          [x, y, var] -> trace ("!! " <> pp acc) $ Just $
+            appR (appR _comma (appR x var)) (appR y var)
+          _ -> error $ "hey\n" <> show acc <> ":" <> show i --  Nothing -- throwError?
+                <> "\n" <> pp i
+      ItemCons _ _  -> Nothing
+      ItemAbsL _ t -> go acc t
+      ItemAbsR t _ -> go acc t
+      ItemAppLeft t i' -> go (t:acc) i'
+      ItemAppRight i' t -> go (t:acc) i'
+      ItemVar _ _ -> Nothing
       t@(ItemTodo {}) -> error $ "unresolved todo: " <> show t <> show (isClosed t) <> show (resolve t) <> show (bindsLeft t)
-      _ -> error "unreachable"
-flattenItem i = error $ show (itemTy i) <> "\n" <> show i
+      e -> error $ "unreachable: " <> show e
+
+--flattenItem i = error $ show (itemTy i) <> "\n" <> show i
 
 step :: ParseTo a => St a -> M (St a)
 
@@ -281,19 +330,29 @@ step (l, ItemPop : r) = do
 -- step (x : ItemPush : l, ItemPop : r) = pure (l, x : r)
 -- step s@(_, ItemPop : _)              = throwError $ "mismatched ')':\n" <> show s
 
+-- handle ItemTodo nodes
 step (l, ri : r) | Just _ <- isClosed ri, Just (todo, ri') <- resolve ri = do
   pure (l <> todo, ri' : r)
+step ([l], []) =
+  case isClosed l of
+    Nothing -> throwError "bad parse"
+    Just _ ->
+      case resolve l of
+        Just (todo, l') -> pure (todo, [l'])
+        Nothing -> pure ([l], [])
+
+step (l, ri : r) | Just _ <- isClosed ri, Just ri' <- macroApply ri = pure (l, ri' : r)
 
 -- Apply to term
 step (li : l, ri : r)
-    | Just (ty,_) <- bindsRight li
-    , Just ty' <- isClosed ri
-    , ty == ty' = do
+    | Just (ty, _) <- bindsRight li
+    , Just ty' <- itemNormTy ri
+    , tyNormalize ty `teq` ty' = do
   pure (l, appR li ri : r)
 step (li : l, ri : r)
-    | Just ty <- isClosed li
+    | Just ty <- itemNormTy li
     , Just (ty', _) <- bindsLeft ri
-    , ty == ty' = do
+    , ty `teq` tyNormalize ty' = do
   pure (l, appL li ri : r)
 --step (ItemAtom otherCtxt bound wl (ty':rMinusOne) outTy : l, (ItemAtom termCtxt args [] [] ty : r)) | ty == ty' = do
 --  t <- finish' termCtxt args ty
@@ -302,9 +361,10 @@ step (li : l, ri : r)
 -- Introduce join
 step (lt@(li : _), rt@(ri : _))
   | Just (ty, _) <- bindsRight li
-  , Just (ty', _) <- bindsLeft ri, ty == ty' = do
-  v <- mkVar <$> fresh "X"
-  pure (lt, _var v : _comma : _var v : rt)
+  , Just (ty', _) <- bindsLeft ri
+  , ty `teqn` ty' = do
+  v <- fresh "X"
+  pure (lt, _var v ty : _comma : _var v ty' : rt)
 
 -- [push step]
 --   Otherwise, push the next word to the stack
@@ -316,6 +376,23 @@ step (l, w : r) = pure (w : l, r)
 step (s, []) = pure (s, [])
 
 step (l,r) = error $ "3) unreachable?\n" <> pwrap (show l <> " | " <> show r)
+
+flattenItem :: ParseTo a => Item a -> a
+flattenItem i = go [] [] i -- finish (o, map flattenItem is, x)
+  where
+    -- (is, x) = go [] [] i
+    Just ty = itemTy i
+    go l r = \case
+      ItemCons c _  -> finish (ty, map flattenItem (reverse l <> r), c)
+      --ItemFn a _ -> (reverse l <> r, a)
+      ItemAbsL _ t -> go l r t
+      ItemAbsR t _ -> go l r t
+      ItemAppLeft t i' -> go (t:l) r i'
+      ItemAppRight i' t -> go l (t:r) i'
+      ItemVar v _ -> mkVar v
+      t@(ItemTodo {}) -> error $ "unresolved todo: " <> show t <> show (isClosed t) <> show (resolve t) <> show (bindsLeft t)
+      e -> error $ "unreachable: " <> show e
+--flattenItem i = error $ show (itemTy i) <> "\n" <> show i
 
 step' st = do
   a' <- step (stVal st)
@@ -374,7 +451,7 @@ runTrace ws = map fst $ flip runStateT 0 $ runExceptT $ do
   history <- iter (wrap step) ([], ws)
   case last history of
     ([_], []) -> pure history
-    _ -> throwError $ "bad parse; final state: " <> pp (last history)
+    _ -> throwError $ "bad parse; final state:\n" <> pp (last history)
 mlast :: PP a => [Either String [St a]] -> [Either String (Item a)]
 mlast = map (fmap go)
   where
@@ -415,38 +492,16 @@ runCatShelf base = do
 --efix e = error $ show e
 --efix (Term t) = t
 
--- data T
---   = TVar' Var
---   | TPred' Pred
---   deriving (Eq, Show)
 
-eg1 = "cat on shelf"
-eg1' = "on cat shelf"
-eg2 = "cat on shelf shelf on cat"
-eg3 = "cat sees cat with telescope" -- surprising?
-eg5 = "cat cat cat cat"
-eg6 = "cat X X on Y"
-eg6' = "cat ?x ?x on Y"
-eg7 = "X cat on X Y"
-
-bad1 = "cat on" -- bad, incomplete
-bad2 = "on on" -- bad, incomplete
-
--- confusing examples
-conf1  = "on on cat cat"  -- a cat is on something that is on a cat
-conf1' = "on cat on cat" -- a cat is on something that is on a cat
-conf2  = "X Y on" -- Y is on X
+tests =
+  [ "p q"
+  , "a a/b b/c c"
+  , "p (q + r)"
+  , "p (/foo F + B bar/p)"
+  , "p (/foo F + /bar B)"
+  , "p (/foo F + /bar b)"
+  ]
 
 printParseResult (Error e _) = putStrLn $ e <> "\n"
 printParseResult (Success0 q) = putStrLn $ unlines (map show q)
 printParseResult (Success1 q t) = putStrLn $ show t <> "\n" <> unlines (map show q)
-
-tests =
-  [ "x/y x y"
-  , "x x/y y"
-  , "(x/y x) y"
-  , "x (y y/x)"
-  , "x (z/x/y z) y"
-  ]
-
--- chk = mapM_ run3 tests

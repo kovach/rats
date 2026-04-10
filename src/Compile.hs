@@ -720,7 +720,7 @@ data E'
   deriving (Eq, Show)
 
 instance PP E' where pp = show
-type Schema = CS.Pred -> [CS.ItemTy]
+type Schema = CS.Pred -> [CS.Ty]
 predArity :: CS.Pred -> Int
 predArity s = (+1) . length . filter (== '/') $ s
 -- TODO: how safe is this? allow `foo` to refer to both nullary and unary predicates
@@ -728,20 +728,28 @@ predArity s = (+1) . length . filter (== '/') $ s
 isInfix p = p `elem` ["move", "at", "set", "is"]
 
 _nullary = CS.ItemTy { tLeft = [], tRight = [], tResult = _te }
-_n_ary n = CS.ItemTy { tLeft = [], tRight = replicate n _t, tResult = _te }
-_infix = CS.ItemTy { tLeft = [_t], tRight = [_t], tResult = _te }
+_n_ary n = iterate (flip ArrowRight _t) _te !! n
 defaultSchema :: Schema
-defaultSchema p | isInfix p = [_infix]
+defaultSchema p | isInfix p = [_infixTy _t _te _t]
 defaultSchema p =
   let n = predArity p in
       case n of
         1 -> [_n_ary 0, _n_ary 1]
-        2 -> [_infix]
+        2 -> [_infixTy _t _te _t]
         _ -> [_n_ary n]
       -- if n == 1 then [[], [_t]] else [replicate n _t]
 
+eta t (ArrowLeft ty x) = ItemAbsL ty (eta t x)
+eta t (ArrowRight x ty) = ItemAbsR (eta t x) ty
+eta t ty@(Ty _) = t ty
+
 --termOfString = CS.Term . mkPred
 termOfString = ItemPred
+
+t_te = ArrowLeft _t _te -- could equivalently be ArrowRight
+t_te' = ArrowRight _te _t
+plusTy = ArrowLeft t_te (ArrowRight t_te t_te)
+
 -- assign an item type to each token
 itemize :: Schema -> Token -> Item E'
 itemize _s (Token "(") = ItemPush
@@ -749,15 +757,15 @@ itemize _s (Token ")") = ItemPop
 itemize _s (Token "_") = ItemHole
 
 itemize _s (Token pr) | Just _ <- toJoinOp pr = _join $ mkPred pr
-itemize _s (Token "+")                        = ItemFn (TPred "+") (ItemTy [_t] _te [_t, _t]) -- ItemAtom [] [termOfString "+"] [_t, _t, _t] _te
-itemize _s (Token s@(x : _)) | isUpper x      = _var $ mkVar s
-itemize _s (Token s@('_' : _))                = _var $ mkVar s
+itemize _s (Token "+")                        = eta (MacroAnd) plusTy
+itemize _s (Token s@(x : _)) | isUpper x      = _var s _t
+itemize _s (Token s@('_' : _))                = _var s _t
 itemize _s (Token (':' : p))                  = termOfString p -- ItemAtom [] [termOfString p] [] _t
 itemize  s (Token ('!' : p))                  =
-  Items [ ItemFn (Bang p) (ItemTy l out r) | (CS.ItemTy l out r) <- s p ]
+  Items [ eta (ItemCons $ Bang p) ty | ty <- s p ]
   --Items [ ItemAtom [] [termOfString "!", termOfString p] ar _te | ar <- s p ]
 itemize  s (Token p@(_ : _))                  =
-  Items [ ItemFn (TPred p) (ItemTy l out r) | (CS.ItemTy l out r) <- s p ]
+  Items [ eta (ItemCons $ TPred p) ty | ty <- s p ]
   --Items [ ItemAtom [] [termOfString p] ar _te | ar <- s p ]
 itemize _s (Token []) = error "empty word"
 
@@ -774,7 +782,8 @@ instance OfItem E' where
   finish (ty, [x, y], (TPred op)) | ty == _te, Just op' <- toJoinOp op = Join op' x y
   finish (ty, ts, (TPred p)) | ty == _te = Leaf (TPred p : ts)
   finish (ty, [], (TVar v)) | ty == _t = TVar v
-  finish (ty, [], (TPred p)) | ty == _t = TPred p
+  --finish (ty, [], (TPred p)) | ty == _t = TPred p
+  finish (_ty, ts, (TPred p)) = Leaf (TPred p : ts)
   finish t = error $ show t
   mkVar = TVar
   mkPred = TPred
@@ -783,7 +792,9 @@ instance OfItem E' where
 turnConvert :: E' -> E
 turnConvert = \case
     Leaf (TPred "!" : TPred name : rest) -> Atom (Pattern AtomPos  NoVars (map fix $ TPred name : rest))
-    Leaf (TPred ( name) : rest) -> Atom (Pattern AtomFree NoVars (map fix $ TPred name : rest))
+    (Leaf (TPred "+" : t : Leaf x : Leaf y : [])) ->
+      And (turnConvert (Leaf $ x <> [t])) (turnConvert (Leaf $ y <> [t]))
+    Leaf (TPred name : rest) -> Atom (Pattern AtomFree NoVars (map fix $ TPred name : rest))
     Join (Fixed ",") a b -> And (turnConvert a) (turnConvert b)
     Join (Fixed "/") a b -> Over (turnConvert a) (turnConvert b)
     Join (Binary l r) a b -> GenAnd l r (turnConvert a) (turnConvert b)
@@ -795,13 +806,14 @@ turnConvert = \case
       t -> error $ "2) unreachable?" <> show t
 
 firstSuccess parses =
-    case mapMaybe s1 parses of
+    case mapMaybe toMaybe parses of
       [e] -> e
-      _ -> error $ "bad parse: " <> unlines (map err parses)
+      [] -> error $ "bad parse: " <> unlines (map err parses)
+      xs -> error $ "multiple parses:\n" <> show (length xs) <> unlines (map pp xs)
   where
-    s1 (Right e) = Just e
+    toMaybe (Right e) = Just e
     --s1 (Success1 _ e) = Just e
-    s1 _ = Nothing
+    toMaybe _ = Nothing
     err (Left e) = e
 --firstSuccess [Success1 _ e] = e
 --firstSuccess [Error e _] = error e

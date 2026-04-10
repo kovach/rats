@@ -101,6 +101,7 @@ pprint = putStrLn . pp
 pwrap x = "(" <> x <> ")"
 capitalize = map toUpper
 bwrap x = "[" <> x <> "]"
+brwrap x = "{" <> x <> "}"
 spwrap x = " " <> x <> " "
 commas = intercalate ", "
 spaces = intercalate " "

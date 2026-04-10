@@ -508,15 +508,18 @@ tests =
 tests' =
   [ "a a/b b/c c"
   , "a (a/b b)"
-  , "(x/x/x a b c)"
-  , "a (b x/x/x c)"
-  , "a (x/x/x b c)"
-  , "a (x/x/x b c)"
-  , "a (*/b B x/x/x c)"
-  , "a (*/b B x/x/x */c c)"
-  , "a (/b b x/x/x /c c)"
-  , "a (*/b B x/x/x */c c/d d/e e)"
+  , "cat & black X"
+  , "(cat&black&long) X"
+  , "& a b c"
+  , "a (b & c)"
+  , "a (& b c)"
+  , "a (/b B & c)"
+  , "a (/b B & /c c)"
+  , "a (*/b B & */c c)" -- not needed
+  , "a (/b b & /c c)"
+  , "a (/b B & /c c/d d/e e)"
   , "q (p p/q)"
+  , "f (A a/sum/b B)"
   ]
 
 printParseResult (Error e _) = putStrLn $ e <> "\n"
@@ -529,12 +532,13 @@ data Ut = UA Pred Int [Ut] [Ut] | UV Var | UH | UP Ut Ut | UNil
   deriving (Eq, Show)
 isLeaf UH = True
 isLeaf UV{} = True
-isLeaf UA{} = False
 isLeaf UNil = True
+isLeaf UA{} = False
 isLeaf UP{} = False
 tr f t | isLeaf t = tell $ f t
 tr f (UP l r) = tr f l >> tr f r
 tr f (UA _ _ ls rs) = mapM_ (tr f) (ls <> rs)
+tr _ _ = error "unreachable: check isLeaf"
 uvs :: Ut -> [Var]
 uvs = execWriter . tr f
   where
@@ -542,28 +546,12 @@ uvs = execWriter . tr f
     f _ = []
 fr t = UV $ fromJust $ find (not . (`elem` (uvs t))) [ "x" <> show i | i <- [0..] ]
 
-il x (UP l r) =
-  case il x l of
-    Just l' -> Just $ UP l' r
-    Nothing -> UP l <$> il x r
-il _ (UA _ 0 _ _) = Nothing
-il UH (UA p n ls rs) = Just $ UA p n (UH : ls) rs
-il x  (UA p n ls rs) = Just $ UA p (n-1) (x : ls) rs
-il _ UV{} = error ""
-il _ UH{} = error ""
-il l UNil = error $ show l
--- todo allow?
-
-ir x (UP l r) =
-  case ir x r of
-    Just r' -> Just $ UP l r'
-    Nothing -> flip UP r <$> ir x l
-ir _ (UA _ 0 _ _) = Nothing
-ir UH (UA p n ls rs) = Just $ UA p n ls (UH : rs)
-ir x  (UA p n ls rs) = Just $ UA p (n-1) ls (x : rs)
-ir _ UV{} = error ""
-ir _ UH{} = error ""
-ir _ UNil = error ""
+insertL UH (UA p n ls rs) = UA p n (UH : ls) rs
+insertL x  (UA p n ls rs) = UA p (n-1) (x : ls) rs
+insertL _ _ = error ""
+insertR UH (UA p n ls rs) = UA p n ls (UH : rs)
+insertR x  (UA p n ls rs) = UA p (n-1) ls (x : rs)
+insertR _ _ = error ""
 
 isTerm UH = True
 isTerm UV{} = True
@@ -571,22 +559,23 @@ isTerm _ = False
 instance Semigroup Ut where
   UNil <> x = x
   x <> UNil = x
-  u <> v | isTerm v = fromJust $ ir v u
-  v <> u | isTerm v = fromJust $ il v u
+  u <> v | isTerm v, Just kr <- stepR u = kr v
+  v <> u | isTerm v, Just kl <- stepL u = kl v
   u <> v | Just kl <- stepR u, Just kr <- stepL v =
       let x = fr (UP u v) in UP (kl x) (kr x)
   x <> y = UP x y
 instance Monoid Ut where
   mempty = UNil
 
+
 stepR (UP l r) | Just k <- stepR r = Just (UP l . k)
 stepR (UP l r) | Just k <- stepR l = Just (flip UP r . k)
-stepR (UA p i ls rs) | i > 0 = Just $ \v -> UA p (i-1) ls (v : rs)
+stepR x@(UA _ i _ _) | i > 0 = Just $ \v -> insertR v x
 stepR _ = Nothing
 
 stepL (UP l r) | Just k <- stepL l = Just (flip UP r . k)
 stepL (UP l r) | Just k <- stepL r = Just (UP l . k)
-stepL (UA p i ls rs) | i > 0 = Just $ \v -> UA p (i-1) (v:ls) rs
+stepL x@(UA _ i _ _) | i > 0 = Just $ \v -> insertL v x
 stepL _ = Nothing
 
 simpl (UP l r) = UP (simpl l) (simpl r)

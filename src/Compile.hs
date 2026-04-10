@@ -686,7 +686,8 @@ specialTokens =
   , "+"
   , "="
   , "~"
-  , "*" ]
+  , "*"
+  , "&" ]
 endpointMarkers :: [(Char, EndpointCmp)]
 endpointMarkers = zip "~=<>" [ECNone, ECEq, ECLt, ECGt]
 isEndpointJoin a b = do
@@ -834,20 +835,20 @@ parseOne input = map (RuleStatement Nothing) (parseCS input)
 
 oneUt = foldl' UP UNil
 
-fx = newJoin . asdf . tokenize (\(x:r) -> if [x] `elem` specialTokens then Just (Token [x], r) else Nothing)
-asdf = go
+fx = newJoin . go . tokenize peel
   where
-
+    peel (x:r) = if [x] `elem` specialTokens then Just (Token [x], r) else Nothing
+    peel _ = error "unreachable"
     go  (Token "(" : r) =
       case span (/= Token ")") r of
         (xs, Token ")" : r') -> oneUt (go xs) : go r'
         _ -> error ""
-    go (x : r) =
-      one x : go r
+    go (x : r) = one x : go r
     go [] = []
     one (Token ")") = error "unmatched ')'"
     one (Token s@(x : _)) | isUpper x = UV s
     one (Token "*")                   = UH
+    one (Token "&")                   = UA "&" 3 [] []
     one (Token s@('_' : _))           = UV s
     one (Token p@(_ : _))             = UA p (predArity p) [] []
     one (Token [])                    = error "empty word"

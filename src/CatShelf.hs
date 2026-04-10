@@ -520,6 +520,7 @@ tests' =
   , "a (/b B & /c c/d d/e e)"
   , "q (p p/q)"
   , "f (A a/sum/b B)"
+  , "the (long & black & cat) is at X"
   ]
 
 printParseResult (Error e _) = putStrLn $ e <> "\n"
@@ -556,17 +557,16 @@ insertR _ _ = error ""
 isTerm UH = True
 isTerm UV{} = True
 isTerm _ = False
-instance Semigroup Ut where
-  UNil <> x = x
-  x <> UNil = x
-  u <> v | isTerm v, Just kr <- stepR u = kr v
-  v <> u | isTerm v, Just kl <- stepL u = kl v
-  u <> v | Just kl <- stepR u, Just kr <- stepL v =
-      let x = fr (UP u v) in UP (kl x) (kr x)
-  x <> y = UP x y
-instance Monoid Ut where
-  mempty = UNil
 
+join :: Ut -> Ut -> Ut
+
+UNil `join` x = x
+x `join` UNil = x
+u `join` v | isTerm v, Just kr <- stepR u = kr v
+v `join` u | isTerm v, Just kl <- stepL u = kl v
+u `join` v | Just kl <- stepR u, Just kr <- stepL v =
+    let x = fr (UP u v) in UP (kl x) (kr x)
+x `join` y = UP x y
 
 stepR (UP l r) | Just k <- stepR r = Just (UP l . k)
 stepR (UP l r) | Just k <- stepR l = Just (flip UP r . k)
@@ -586,7 +586,7 @@ simpl (UA p i ls rs) = UA p i (fix ls) (fix rs)
     fix [] =[]
 simpl x = x
 
-solve (UP l r) = solve l <> solve r
+solve (UP l r) = solve l `join` solve r
 solve x = x
 
 newJoin :: [Ut] -> Ut

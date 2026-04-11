@@ -19,7 +19,12 @@ import Data.Char
 import Data.List.Split
 
 type Pred = String
-type Var = String
+data Var = IVar String | GenVar String
+  deriving (Eq, Ord, Show)
+
+varStr :: Var -> String
+varStr (IVar s)    = s
+varStr (GenVar s) = s
 
 data Word a
   = Atom Pred Int [Word a] [Word a] -- predicate, arity, leftmost args, rightmost args
@@ -66,8 +71,6 @@ tr f = execWriter . go
 vars :: Word a -> [Var]
 vars = tr $ \case Var v -> [v]; _ -> []
 
--- fresh t = Var $ fromJust $ find (not . (`elem` (vars t))) [ "X" <> show i | i <- [0..] ]
-
 findAll :: (Word a -> Bool) -> Word a -> [Word a]
 findAll p = tr $ \w -> [w | p w]
 
@@ -96,28 +99,28 @@ pattern BinOp1 x op = Pair x (BinOp2 op)
 pattern BinOp0 x op y  = Pair (BinOp1 x op) y
 
 data Stream a = Stream a (Stream a)
-freshVars :: Stream (Word a)
+freshVars :: Stream String
 freshVars = go 1
   where
-    go n = Stream (Var ("X" <> show n)) (go (n+1))
+    go n = Stream ("X" <> show n) (go (n+1))
 
-type M a b = State (Stream (Word a)) b
-fresh :: M a (Word a)
+type M b = State (Stream String) b
+fresh :: M String
 fresh = do
   Stream h t <- get
   put t
   pure h
 
-join :: Word a -> Word a -> M a (Word a)
+join :: Word a -> Word a -> M (Word a)
 Nil `join` x = pure x
 x `join` Nil = pure x
 x `join` BinOp2 op = pure $ BinOp1 x op
 BinOp1 x op `join` y = pure $ BinOp0 x op y
 u `join` v | isTerm v, Just kr <- stepR u = pure $ kr v
 v `join` u | isTerm v, Just kl <- stepL u = pure $ kl v
-u `join` v | Just kl <- stepR u, Just kr <- stepL v = do
-  x <- fresh
- --   let x = fresh (Pair u v) in
+u `join` v | Just kl <- stepR u
+           , Just kr <- stepL v = do
+  x <- Var . GenVar <$> fresh
   pure $ Pair (kl x) (kr x)
 x `join` y = pure $ Pair x y
 
@@ -142,7 +145,7 @@ simpl (Atom p i ls rs) = Atom p i (fix ls) (fix rs)
 
 simpl x = x
 
-solve :: Word a -> M a (Word a)
+solve :: Word a -> M (Word a)
 solve (Pair l r) = do { l' <- solve l; r' <- solve r; join l' r' }
 solve (Atom p i l r) = do
   l' <- mapM solve l
@@ -161,29 +164,38 @@ oneWord = foldl' pair Nil
 newJoin :: [Word a] -> Word a
 newJoin = simpl . runSolve . oneWord
 
+instance PP Var where
+  pp (IVar v) = "_" <> v
+  pp (GenVar v) = v
 instance PP a => PP (Word a) where
   pp (Pair l r) = pp l <> " " <> pp r
   pp (Atom p i ls rs) = (if i > 0 then "[!"<>show i<>"]" else "") <> pwrap (unwords (p : map pp (reverse ls <> rs)))
-  pp (Var v) = v
+  pp (Var v) = pp v
   pp (Skip) = "*"
   pp (Term a) = pp a
   pp Nil = "."
 
 data Token = Token String deriving (Eq, Ord, Show)
 
-token "" = []
-token acc = [Token $ reverse acc]
+pickToken :: (String -> Maybe (Token, String)) -> String -> [Token]
+pickToken sp = pickToken' ""
+  where
+    pickToken' acc ""                      = token acc
+    pickToken' acc s | Just (t, s') <- sp s = (token acc) <> [t] <> pickToken' "" s'
+    pickToken' acc (c:s') | isSpace c       = token acc <> pickToken' "" s'
+    pickToken' acc (c:s')                   = pickToken' (c:acc) s'
+    token "" = []
+    token acc = [Token $ reverse acc]
 
-pickToken' _sp acc ""                      = token acc
-pickToken' sp acc s | Just (t, s') <- sp s = (token acc) <> [t] <> pickToken' sp "" s'
-pickToken' sp acc (c:s') | isSpace c       = token acc <> pickToken' sp "" s'
-pickToken' sp acc (c:s')                   = pickToken' sp (c:acc) s'
-pickToken sp s = pickToken' sp "" s
+
 tokenize :: (String -> Maybe (Token, String)) -> String -> [Token]
 tokenize sp s = pickToken sp s
 
 fx :: PP a => [String] -> (Token -> Maybe (Word a)) -> String -> [Word a]
-fx specialTokens turnWord = map (check . newJoin . go) . splitRules . tokenize peel
+fx specialTokens turnWord =
+    tokenize peel
+    .> splitRules
+    .> map (check . newJoin . go)
   where
     check x = if not (completeWord x) then error ("incomplete: " <> pp x) else x
     peel (x:r) = if [x] `elem` specialTokens' then Just (Token [x], r) else Nothing
@@ -201,8 +213,8 @@ fx specialTokens turnWord = map (check . newJoin . go) . splitRules . tokenize p
     push x (s : rest) = (x:s):rest
     push _ _ = error "unreachable"
     single t | Just w <- turnWord t      = w
-    single (Token s@(x : _)) | isUpper x = Var s
-    single (Token s@('_' : _))           = Var s
+    single (Token s@(x : _)) | isUpper x = Var (IVar s)
+    single (Token s@('_' : _))           = Var (IVar s)
     single (Token "*")                   = Skip
     single (Token [])                    = error "empty word"
     single (Token p)                     = error $ "invalid word: " <> p
@@ -237,8 +249,12 @@ mergePred p w =
     elim t = applySubst (mkSubst t) $
       mapMaybe (\x -> if x == t then Just Nil else Nothing) w
 
-    mkSubst (Atom _ 0 ls rs) =
-      case [v | Var v <- ls <> rs] of
-        v : rest -> Map.fromList [(r, Var v) | r <- rest]
-        []       -> Map.empty
+    mkSubst (Atom _ 0 ls rs) = result
+      where
+        vs = [v | Var v <- ls <> rs]
+        canon = case filter isIVar vs of { c:_ -> c; [] -> head vs }
+        isIVar = \case (IVar _) -> True; _ -> False
+        result = case vs of
+           [] -> Map.empty
+           _  -> Map.fromList [(r, Var canon) | r <- vs, r /= canon]
     mkSubst _ = Map.empty

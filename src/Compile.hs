@@ -716,9 +716,10 @@ convert = \case
 
 convertTerm :: P.Word Mark -> Term
 convertTerm = \case
-  P.Var v -> TermVar (FreeVar v)
+  P.Var (P.IVar v) -> TermVar (FreeVar ("_" <> v))
+  P.Var (P.GenVar v) -> TermVar (FreeVar v)
   P.Term _t -> error"todo"
-  P.Atom p 0 l r -> error""
+  P.Atom _ 0 _ _ -> error""
   P.Atom {} -> error""
   P.Nil -> error""
   P.Skip -> error""

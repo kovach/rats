@@ -71,7 +71,7 @@ pattern PP p ts <- Pattern _ _ (TermPred p : ts)
 pattern PPI p s i ts <- Pattern s (PVar (Just i) _) (TermPred p : ts)
 pattern PPP p a b ts = Pattern a b (TermPred p : ts)
 
-data EndpointCmp = ECLt | ECGt | ECEq | ECNone
+data EndpointCmp = ECLt | ECGt | ECEq | ECAny
   deriving (Show, Eq, Ord)
 
 data E = Atom Pattern
@@ -210,7 +210,7 @@ instance PP EndpointCmp where
     ECEq -> "="
     ECLt -> "<"
     ECGt -> ">"
-    ECNone -> "~"
+    ECAny -> "~"
 instance PP E where
   pp (Atom p) = pp p
   pp (After e) = "#" <> pp e
@@ -219,7 +219,7 @@ instance PP E where
   pp (And a b) = pwrap $ pp a <> ", " <> pp b
   pp (Seq a b) = pwrap $ pp a <> "; " <> pp b
   pp (Par a b) = pwrap $ pp a <> " | " <> pp b
-  pp (Over a b) = pwrap $ pp a <> " : " <> pp b
+  pp (Over a b) = pwrap $ pp a <> " " <> overSym <> " " <> pp b
   pp (Under a b) = pwrap $ pp a <> " \\ " <> pp b
   pp (Same a b) = pwrap $ pp a <> " ~ " <> pp b
   pp (At a b) = pwrap $ pp a <> " @ " <> pp b
@@ -314,3 +314,6 @@ tVars Bot = []
 
 -- special predicate names
 pattern PredIsId = "is-id"
+
+partSym = ":"
+overSym = "/"

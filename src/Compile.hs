@@ -169,7 +169,7 @@ checkTerm = \case
 
 checkCmp cmp a b =
   case cmp of
-    ECEq -> [a `Eql` b]; ECNone -> []
+    ECEq -> [a `Eql` b]; ECAny -> []
     ECLt -> [a `Lt` b]; ECGt -> [b `Lt` a]
 
 check :: MonadPatternWriter m => E -> m I
@@ -667,22 +667,22 @@ main3 = do
 -- Parsing Stuff --
 -- TODO move this
 specialTokens :: [String]
-specialTokens = [ "." , "," , ":" , "~" , "&" ]
+specialTokens = [ "." , "," , "/" , "~" , "&" ]
 endpointMarkers :: [(Char, EndpointCmp)]
-endpointMarkers = zip "~=<>" [ECNone, ECEq, ECLt, ECGt]
+endpointMarkers = zip "~=<>" [ECAny, ECEq, ECLt, ECGt]
 isEndpointJoin a b = do
   av <- lookup a endpointMarkers
   bv <- lookup b endpointMarkers
   pure (av, bv)
 
 predArity :: P.Pred -> Int
-predArity s = (+1) . length . filter (== '/') $ s
+predArity s = (+1) . length . filter (== ':') $ s
 
-data BinOps = Over'
-  deriving (Show, Eq)
+data BinOps = Over' deriving (Show, Eq)
+
 turnWord = \case
     (P.Token "&") -> Just $ P.Atom "&" 3 [] []
-    (P.Token ":") -> Just $ P.Term Over'
+    (P.Token "/") -> Just $ P.Term Over'
     (P.Token t) | predStart t ->
       let (_, core) = splitPrefix t
        in if core `elem` binaryTokens
@@ -693,12 +693,18 @@ turnWord = \case
     splitPrefix ('!':s) = ("!", s)
     splitPrefix s = ("", s)
     binaryTokens = ["is", "at", "move", "the"]
-    predStart (x:_) = isLower x || x `elem` ['/', '!']
+    predStart (x:_) = isLower x || x `elem` [':', '!']
     predStart _ = False
+
+isAssertive :: P.Word a -> Bool
+isAssertive = P.any isAssert
+  where
+    isAssert (P.Atom ('!' : _) _ _ _) = True
+    isAssert _ = False
 
 type Mark = BinOps
 instance PP BinOps where
-  pp Over' = ":"
+  pp Over' = "/"
 convert :: P.Word Mark -> E
 convert = \case
   P.Atom p 0 l r ->
@@ -708,6 +714,7 @@ convert = \case
           p'       -> Atom (Pattern AtomFree NoVars (TermPred (Pred p') : (map convertTerm ts)))
   P.Atom {} -> error "incomplete atom"
   P.BinOp0 x Over' y -> Over (convert x) (convert y)
+  P.Pair l r | isAssertive l -> GenAnd ECLt ECAny (convert l) (convert r)
   P.Pair l r -> And (convert l) (convert r)
   P.Nil -> error""
   P.Var _v -> error""

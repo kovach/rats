@@ -4,7 +4,7 @@ import Control.Monad ( guard, when )
 import qualified Data.Map.Strict as Map
 import Basic
 import Data.Function ( on )
-import Data.Monoid ( All(..) )
+import Data.Monoid ( All(..), Any(..) )
 
 import Prelude hiding ( Word )
 import Control.Monad.Writer ( WriterT, runWriterT, tell, execWriter, Writer )
@@ -12,7 +12,7 @@ import Control.Monad ( foldM )
 import Control.Monad.State
 
 import Data.Function ((&))
-import Data.List
+import Data.List as List
 import Data.Maybe hiding ( mapMaybe )
 import Text.Read ( readMaybe )
 import Data.Char
@@ -35,20 +35,20 @@ data Word a
 -- Examples
 -- require definition in Compile to run
 tests' =
-  [ "a a/b b/c c"
-  , "a (a/b b)"
+  [ "a a:b b:c c"
+  , "a (a:b b)"
   , "cat & black X"
   , "(cat&black&long) X"
   , "& a b c"
   , "a (b & c)"
   , "a (& b c)"
-  , "a (/b B & c)"
-  , "a (/b B & /c c)"
-  , "a (*/b B & */c c)" -- skip optional here
-  , "a (/b b & /c c)"
-  , "a (/b B & /c c/d d/e e)"
-  , "q (p p/q)"
-  , "f (A a/sum/b B)"
+  , "a (:b B & c)"
+  , "a (:b B & :c c)"
+  , "a (*:b B & *:c c)" -- skip optional here
+  , "a (:b b & :c c)"
+  , "a (:b B & :c c/d d/e e)"
+  , "q (p p:q)"
+  , "f (A a:sum:b B)"
   , "the (long & black & cat) is at X"
   ]
 
@@ -67,6 +67,9 @@ tr f = execWriter . go
         Atom _ _ ls rs -> mapM_ go (ls <> rs)
         _              -> pure ()
 
+all f = getAll . tr (All . f)
+any f = getAny . tr (Any . f)
+
 -- variables in term
 vars :: Word a -> [Var]
 vars = tr $ \case Var v -> [v]; _ -> []
@@ -76,10 +79,10 @@ findAll p = tr $ \w -> [w | p w]
 
 -- atoms with >0 arity are incomplete
 completeWord :: Word a -> Bool
-completeWord = getAll . tr check
+completeWord = ConcatParse.all check
   where
-    check (Atom _ i _ _) | i > 0 = All False
-    check _ = All True
+    check (Atom _ i _ _) | i > 0 = False
+    check _ = True
 
 -- Skip is used to shift the arguments to an atom; does not consume arity when bound
 insertL Skip (Atom p n ls rs) = Atom p n (Skip : ls) rs
@@ -243,7 +246,7 @@ mergePred p w =
   where
     targets = findAll isTarget w
 
-    isTarget (Atom p' 0 ls rs) | p' == p = all isVar (ls <> rs)
+    isTarget (Atom p' 0 ls rs) | p' == p = List.all isVar (ls <> rs)
     isTarget _                           = False
 
     elim t = applySubst (mkSubst t) $

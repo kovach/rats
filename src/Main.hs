@@ -10,6 +10,7 @@ import DrawDiagram.Main (runDrawDiagram)
 import TestPipeline (runTestPipeline)
 import CatShelf (runCatShelf)
 import CatShelf
+import ConcatParse
 import Compile
 import Basic (pp)
 

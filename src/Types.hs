@@ -180,7 +180,7 @@ instance PP Term where
   pp (TermApp c ts) = c <> args (map pp ts)
   pp (TermBin op a b) = pwrap $ pp a <> pp op <> pp b
 instance PP AtomType where
-  pp AtomFree = "?"
+  pp AtomFree = ""
   pp AtomPos = "!"
   pp AtomAsk = "∃"
   pp AtomNeg = "¬"
@@ -219,7 +219,7 @@ instance PP E where
   pp (And a b) = pwrap $ pp a <> ", " <> pp b
   pp (Seq a b) = pwrap $ pp a <> "; " <> pp b
   pp (Par a b) = pwrap $ pp a <> " | " <> pp b
-  pp (Over a b) = pwrap $ pp a <> " / " <> pp b
+  pp (Over a b) = pwrap $ pp a <> " : " <> pp b
   pp (Under a b) = pwrap $ pp a <> " \\ " <> pp b
   pp (Same a b) = pwrap $ pp a <> " ~ " <> pp b
   pp (At a b) = pwrap $ pp a <> " @ " <> pp b

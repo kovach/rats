@@ -1,0 +1,244 @@
+module ConcatParse where
+
+import Control.Monad ( guard, when )
+import qualified Data.Map.Strict as Map
+import Basic
+import Data.Function ( on )
+import Data.Monoid ( All(..) )
+
+import Prelude hiding ( Word )
+import Control.Monad.Writer ( WriterT, runWriterT, tell, execWriter, Writer )
+import Control.Monad ( foldM )
+import Control.Monad.State
+
+import Data.Function ((&))
+import Data.List
+import Data.Maybe hiding ( mapMaybe )
+import Text.Read ( readMaybe )
+import Data.Char
+import Data.List.Split
+
+type Pred = String
+type Var = String
+
+data Word a
+  = Atom Pred Int [Word a] [Word a] -- predicate, arity, leftmost args, rightmost args
+  | Pair (Word a) (Word a) | Nil
+  | Var Var | Skip | Term a
+  deriving (Eq, Show)
+
+-- Examples
+-- require definition in Compile to run
+tests' =
+  [ "a a/b b/c c"
+  , "a (a/b b)"
+  , "cat & black X"
+  , "(cat&black&long) X"
+  , "& a b c"
+  , "a (b & c)"
+  , "a (& b c)"
+  , "a (/b B & c)"
+  , "a (/b B & /c c)"
+  , "a (*/b B & */c c)" -- skip optional here
+  , "a (/b b & /c c)"
+  , "a (/b B & /c c/d d/e e)"
+  , "q (p p/q)"
+  , "f (A a/sum/b B)"
+  , "the (long & black & cat) is at X"
+  ]
+
+isLeaf  = \case
+  Skip -> True; Var{} -> True; Nil -> True; Term{} -> True
+  Atom{} -> False; Pair{} -> False
+
+isVar = \case Var{} -> True; _ -> False
+
+tr f = execWriter . go
+  where
+    go w = do
+      tell (f w)
+      case w of
+        Pair l r       -> go l >> go r
+        Atom _ _ ls rs -> mapM_ go (ls <> rs)
+        _              -> pure ()
+
+-- variables in term
+vars :: Word a -> [Var]
+vars = tr $ \case Var v -> [v]; _ -> []
+
+-- fresh t = Var $ fromJust $ find (not . (`elem` (vars t))) [ "X" <> show i | i <- [0..] ]
+
+findAll :: (Word a -> Bool) -> Word a -> [Word a]
+findAll p = tr $ \w -> [w | p w]
+
+-- atoms with >0 arity are incomplete
+completeWord :: Word a -> Bool
+completeWord = getAll . tr check
+  where
+    check (Atom _ i _ _) | i > 0 = All False
+    check _ = All True
+
+-- Skip is used to shift the arguments to an atom; does not consume arity when bound
+insertL Skip (Atom p n ls rs) = Atom p n (Skip : ls) rs
+insertL x  (Atom p n ls rs) = Atom p (n-1) (x : ls) rs
+insertL _ _ = error ""
+insertR Skip (Atom p n ls rs) = Atom p n ls (Skip : rs)
+insertR x  (Atom p n ls rs) = Atom p (n-1) ls (x : rs)
+insertR _ _ = error ""
+
+isTerm Skip = True
+isTerm Var{} = True
+isTerm Term{} = True -- TODO
+isTerm _ = False
+
+pattern BinOp2 op = Term op
+pattern BinOp1 x op = Pair x (BinOp2 op)
+pattern BinOp0 x op y  = Pair (BinOp1 x op) y
+
+data Stream a = Stream a (Stream a)
+freshVars :: Stream (Word a)
+freshVars = go 1
+  where
+    go n = Stream (Var ("X" <> show n)) (go (n+1))
+
+type M a b = State (Stream (Word a)) b
+fresh :: M a (Word a)
+fresh = do
+  Stream h t <- get
+  put t
+  pure h
+
+join :: Word a -> Word a -> M a (Word a)
+Nil `join` x = pure x
+x `join` Nil = pure x
+x `join` BinOp2 op = pure $ BinOp1 x op
+BinOp1 x op `join` y = pure $ BinOp0 x op y
+u `join` v | isTerm v, Just kr <- stepR u = pure $ kr v
+v `join` u | isTerm v, Just kl <- stepL u = pure $ kl v
+u `join` v | Just kl <- stepR u, Just kr <- stepL v = do
+  x <- fresh
+ --   let x = fresh (Pair u v) in
+  pure $ Pair (kl x) (kr x)
+x `join` y = pure $ Pair x y
+
+stepR (Pair l r) | Just k <- stepR r = Just (Pair l . k)
+stepR (Pair l r) | Just k <- stepR l = Just (flip Pair r . k)
+stepR x@(Atom _ i _ _) | i > 0 = Just $ \v -> insertR v x
+stepR _ = Nothing
+
+stepL (Pair l r) | Just k <- stepL l = Just (flip Pair r . k)
+stepL (Pair l r) | Just k <- stepL r = Just (Pair l . k)
+stepL x@(Atom _ i _ _) | i > 0 = Just $ \v -> insertL v x
+stepL _ = Nothing
+
+simpl (Pair l r) = Pair (simpl l) (simpl r)
+simpl (Atom p i ls rs) = Atom p i (fix ls) (fix rs)
+  where
+    fix (Skip : vs) = rotateR $ fix vs
+    fix (v : vs) = v : fix vs
+    fix [] =[]
+    rotateR (h : t) = t <> [h]
+    rotateR [] = []
+
+simpl x = x
+
+solve :: Word a -> M a (Word a)
+solve (Pair l r) = do { l' <- solve l; r' <- solve r; join l' r' }
+solve (Atom p i l r) = do
+  l' <- mapM solve l
+  r' <- mapM solve r
+  pure $ Atom p i l' r'
+solve x = pure x
+runSolve x = evalState (solve x) freshVars
+
+pair Nil x = x
+pair x Nil = x
+pair x y = Pair x y
+
+oneWord :: [Word a] -> Word a
+oneWord = foldl' pair Nil
+
+newJoin :: [Word a] -> Word a
+newJoin = simpl . runSolve . oneWord
+
+instance PP a => PP (Word a) where
+  pp (Pair l r) = pp l <> " " <> pp r
+  pp (Atom p i ls rs) = (if i > 0 then "[!"<>show i<>"]" else "") <> pwrap (unwords (p : map pp (reverse ls <> rs)))
+  pp (Var v) = v
+  pp (Skip) = "*"
+  pp (Term a) = pp a
+  pp Nil = "."
+
+data Token = Token String deriving (Eq, Ord, Show)
+
+token "" = []
+token acc = [Token $ reverse acc]
+
+pickToken' _sp acc ""                      = token acc
+pickToken' sp acc s | Just (t, s') <- sp s = (token acc) <> [t] <> pickToken' sp "" s'
+pickToken' sp acc (c:s') | isSpace c       = token acc <> pickToken' sp "" s'
+pickToken' sp acc (c:s')                   = pickToken' sp (c:acc) s'
+pickToken sp s = pickToken' sp "" s
+tokenize :: (String -> Maybe (Token, String)) -> String -> [Token]
+tokenize sp s = pickToken sp s
+
+fx :: PP a => [String] -> (Token -> Maybe (Word a)) -> String -> [Word a]
+fx specialTokens turnWord = map (check . newJoin . go) . splitRules . tokenize peel
+  where
+    check x = if not (completeWord x) then error ("incomplete: " <> pp x) else x
+    peel (x:r) = if [x] `elem` specialTokens' then Just (Token [x], r) else Nothing
+    peel _ = error "unreachable"
+    internalSpecialTokens = ["(", ")", "*"]
+    specialTokens' = internalSpecialTokens <> specialTokens
+    go ts = finishWord $ foldl' step [[]] ts
+    finishWord = \case
+      [ws] -> reverse ws
+      _ -> error "mismatched parens"
+    step stack (Token "(" ) = [] : stack
+    step [_] (Token ")") = error "unmatched ')'"
+    step (ws : stacks) (Token ")") = push (oneWord $ reverse ws) stacks
+    step stacks x  = push (single x) stacks
+    push x (s : rest) = (x:s):rest
+    push _ _ = error "unreachable"
+    single t | Just w <- turnWord t      = w
+    single (Token s@(x : _)) | isUpper x = Var s
+    single (Token s@('_' : _))           = Var s
+    single (Token "*")                   = Skip
+    single (Token [])                    = error "empty word"
+    single (Token p)                     = error $ "invalid word: " <> p
+    splitRules :: [Token] -> [[Token]]
+    splitRules = filter (not . null) . splitOn [Token "."]
+
+mapMaybe :: (Word a -> Maybe (Word a)) -> Word a -> Word a
+mapMaybe f w = fromMaybe w' (f w')
+  where
+    go = mapMaybe f
+    w' = case w of
+      Pair l r       -> pair (go l) (go r)
+      Atom p n ls rs -> Atom p n (map go ls) (map go rs)
+      _              -> w
+
+applySubst :: Map.Map Var (Word a) -> Word a -> Word a
+applySubst s = mapMaybe $ \case
+  Var v -> Map.lookup v s
+  _     -> Nothing
+
+mergePred :: Eq a => Pred -> Word a -> Word a
+mergePred p w =
+  case targets of
+    t : _ -> mergePred p $ elim t
+    _ -> w
+  where
+    targets = findAll isTarget w
+
+    isTarget (Atom p' 0 ls rs) | p' == p = all isVar (ls <> rs)
+    isTarget _                           = False
+
+    elim t = applySubst (mkSubst t) $
+      mapMaybe (\x -> if x == t then Just Nil else Nothing) w
+
+    mkSubst (Atom _ 0 ls rs) =
+      case [v | Var v <- ls <> rs] of
+        v : rest -> Map.fromList [(r, Var v) | r <- rest]
+        []       -> Map.empty
+    mkSubst _ = Map.empty

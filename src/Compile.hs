@@ -34,8 +34,9 @@ import qualified MMap as M
 import qualified Derp.Core as D
 import qualified Derp.Parse as DP
 import qualified Derp.Gen as GD
-import CatShelf hiding (parse, Term, Pred, Var)
-import qualified CatShelf as CS
+--import CatShelf hiding (parse, Term, Pred, Var)
+--import qualified CatShelf as CS
+import qualified ConcatParse as P
 
 data VarScope = VS (Set Var) (Set Var)
   deriving (Eq, Show)
@@ -391,7 +392,7 @@ transLe = fixpoint step
 prs :: Show a => Set (a, a) -> String
 prs = unlines . map show . Set.toList
 toLes :: Constraints -> Set (Var, Var)
-toLes cs = trace ("!!\n" <> prs base <> "\n::\n" <> prs result <> "\n") $ result
+toLes cs = result
   where
     result = base & transLe & scm toLL
     toLL = \case (L (TermVar u), L (TermVar v)) -> one (u,v); _ -> none
@@ -618,8 +619,7 @@ genDerp ttt = do
   let rules = zipWith name [ "r" <> show i | i <- [1..] ] ttt
   let CompilationRec {crResult, crElab} = compile rules
   prelude <- GD.readPrelude
-  let result = prelude <> crResult
-  pure (result, crElab, crResult)
+  pure (prelude <> crResult, crElab, crResult)
 
 writeGenDerp base stmts = do
   (result, elabText, ruleText) <- genDerp stmts
@@ -640,7 +640,8 @@ main1 base = do
 main1' base = do
   pr0 <- readFile (base ++ ".turn")
   let ttt = parseOne pr0
-  writeGenDerp base ttt
+  _ <- writeGenDerp base ttt
+  pure ()
 
 main2' input = do
   let rs = DP.parse input -- assertParse prog $ lexComments ";" input
@@ -665,29 +666,8 @@ main3 = do
 
 -- Parsing Stuff --
 -- TODO move this
-data Token = Token String deriving (Eq, Ord, Show)
-token "" = []
-token acc = [Token $ reverse acc]
-pickToken' _sp acc "" = token acc
-pickToken' sp acc s | Just (t, s') <- sp s = (token acc) <> [t] <> pickToken' sp "" s'
-pickToken' sp acc (c:s') | isSpace c = token acc <> pickToken' sp "" s'
-pickToken' sp acc (c:s') = pickToken' sp (c:acc) s'
-pickToken sp s = pickToken' sp "" s
-tokenize :: (String -> Maybe (Token, String)) -> String -> [Token]
-tokenize sp s = pickToken sp s
-
 specialTokens :: [String]
-specialTokens =
-  [ "."
-  , "("
-  , ")"
-  , "<="
-  , ","
-  , "+"
-  , "="
-  , "~"
-  , "*"
-  , "&" ]
+specialTokens = [ "." , "," , ":" , "~" , "&" ]
 endpointMarkers :: [(Char, EndpointCmp)]
 endpointMarkers = zip "~=<>" [ECNone, ECEq, ECLt, ECGt]
 isEndpointJoin a b = do
@@ -695,162 +675,62 @@ isEndpointJoin a b = do
   bv <- lookup b endpointMarkers
   pure (av, bv)
 
-startSpecial :: String -> Maybe (Token, String)
-startSpecial (a:b:r) | Just _ <- isEndpointJoin a b = Just (Token [a,b], r)
-startSpecial s =
-  case mapMaybe (\t -> (t,) <$> stripPrefix t s) specialTokens of
-    [(t,s')] -> Just (Token t, s')
-    [] -> Nothing
-    _ -> error "internal error: tokenizer ambiguity"
-
-data JoinOp = Binary EndpointCmp EndpointCmp | Fixed String
-  deriving (Eq, Show)
-
-toJoinOp :: String -> Maybe JoinOp
-toJoinOp = \case
-  "," -> Just $ Fixed ","
-  "~" -> Just $ Binary ECNone ECNone
-  "=" -> Just $ Binary ECEq ECEq
-  "/" -> Just $ Fixed "/"
-  [a,b] | Just (l,r) <- isEndpointJoin a b -> Just $ Binary l r
-  _ -> Nothing
-
-data E'
-  = Leaf [E'] -- e's must be t's
-  | Join JoinOp E' E'
-  | TVar CS.Var
-  | TPred CS.Pred
-  | Bang String
-  deriving (Eq, Show)
-
-instance PP E' where pp = show
-type Schema = CS.Pred -> [CS.Ty]
-predArity :: CS.Pred -> Int
+predArity :: P.Pred -> Int
 predArity s = (+1) . length . filter (== '/') $ s
--- TODO: how safe is this? allow `foo` to refer to both nullary and unary predicates
--- TODO: also try fully ambiguity
-isInfix p = p `elem` ["move", "at", "set", "is"]
 
-_nullary = CS.ItemTy { tLeft = [], tRight = [], tResult = _te }
-_n_ary n = iterate (flip ArrowRight _t) _te !! n
-defaultSchema :: Schema
-defaultSchema p | isInfix p = [_infixTy _t _te _t]
-defaultSchema p =
-  let n = predArity p in
-      case n of
-        1 -> [_n_ary 0, _n_ary 1]
-        2 -> [_infixTy _t _te _t]
-        _ -> [_n_ary n]
-      -- if n == 1 then [[], [_t]] else [replicate n _t]
-
-eta t (ArrowLeft ty x) = ItemAbsL ty (eta t x)
-eta t (ArrowRight x ty) = ItemAbsR (eta t x) ty
-eta t ty@(Ty _) = t ty
-
---termOfString = CS.Term . mkPred
-termOfString = ItemPred
-
-t_te = ArrowLeft _t _te -- could equivalently be ArrowRight
-t_te' = ArrowRight _te _t
-plusTy = ArrowLeft t_te (ArrowRight t_te t_te)
-
--- assign an item type to each token
-itemize :: Schema -> Token -> Item E'
-itemize _s (Token "(") = ItemPush
-itemize _s (Token ")") = ItemPop
-itemize _s (Token "_") = ItemHole
-
-itemize _s (Token pr) | Just _ <- toJoinOp pr = _join $ mkPred pr
-itemize _s (Token "+")                        = eta (MacroAnd) plusTy
-itemize _s (Token s@(x : _)) | isUpper x      = _var s _t
-itemize _s (Token s@('_' : _))                = _var s _t
-itemize _s (Token (':' : p))                  = termOfString p -- ItemAtom [] [termOfString p] [] _t
-itemize  s (Token ('!' : p))                  =
-  Items [ eta (ItemCons $ Bang p) ty | ty <- s p ]
-  --Items [ ItemAtom [] [termOfString "!", termOfString p] ar _te | ar <- s p ]
-itemize  s (Token p@(_ : _))                  =
-  Items [ eta (ItemCons $ TPred p) ty | ty <- s p ]
-  --Items [ ItemAtom [] [termOfString p] ar _te | ar <- s p ]
-itemize _s (Token []) = error "empty word"
-
---instance OfItem E' where
---  finish [CS.Term (TPred p), (CS.Term x), (CS.Term y)] ty | ty == _te, Just op <- toJoinOp p = Join op x y
---  finish (CS.Term (TPred p) : ts) ty | ty == _te = Leaf (TPred p : map efix ts)
---  finish [CS.Term (TVar v)] ty | ty == _t = TVar v
---  finish [CS.Term (TPred p)] ty | ty == _t = TPred p
---  finish ts _ = error $ show ts
---  mkVar v = TVar v
---  mkPred p = TPred p
-
-instance OfItem E' where
-  finish (ty, [x, y], (TPred op)) | ty == _te, Just op' <- toJoinOp op = Join op' x y
-  finish (ty, ts, (TPred p)) | ty == _te = Leaf (TPred p : ts)
-  finish (ty, [], (TVar v)) | ty == _t = TVar v
-  --finish (ty, [], (TPred p)) | ty == _t = TPred p
-  finish (_ty, ts, (TPred p)) = Leaf (TPred p : ts)
-  finish t = error $ show t
-  mkVar = TVar
-  mkPred = TPred
-
-
-turnConvert :: E' -> E
-turnConvert = \case
-    Leaf (TPred "!" : TPred name : rest) -> Atom (Pattern AtomPos  NoVars (map fix $ TPred name : rest))
-    (Leaf (TPred "+" : t : Leaf x : Leaf y : [])) ->
-      And (turnConvert (Leaf $ x <> [t])) (turnConvert (Leaf $ y <> [t]))
-    Leaf (TPred name : rest) -> Atom (Pattern AtomFree NoVars (map fix $ TPred name : rest))
-    Join (Fixed ",") a b -> And (turnConvert a) (turnConvert b)
-    Join (Fixed "/") a b -> Over (turnConvert a) (turnConvert b)
-    Join (Binary l r) a b -> GenAnd l r (turnConvert a) (turnConvert b)
-    e -> error $ "1) unreachable?" <> show e
+data BinOps = Over'
+  deriving (Show, Eq)
+turnWord = \case
+    (P.Token "&") -> Just $ P.Atom "&" 3 [] []
+    (P.Token ":") -> Just $ P.Term Over'
+    (P.Token t) | predStart t ->
+      let (_, core) = splitPrefix t
+       in if core `elem` binaryTokens
+          then Just $ P.Atom t 2 [] []
+          else Just $ P.Atom t (predArity core) [] []
+    _ -> Nothing
   where
-    fix = \case
-      TVar v -> TermVar $ FreeVar v
-      TPred p -> TermPred $ Pred p
-      t -> error $ "2) unreachable?" <> show t
+    splitPrefix ('!':s) = ("!", s)
+    splitPrefix s = ("", s)
+    binaryTokens = ["is", "at", "move", "the"]
+    predStart (x:_) = isLower x || x `elem` ['/', '!']
+    predStart _ = False
 
-firstSuccess parses =
-    case mapMaybe toMaybe parses of
-      [e] -> e
-      [] -> error $ "bad parse: " <> unlines (map err parses)
-      xs -> error $ "multiple parses:\n" <> show (length xs) <> unlines (map pp xs)
-  where
-    toMaybe (Right e) = Just e
-    --s1 (Success1 _ e) = Just e
-    toMaybe _ = Nothing
-    err (Left e) = e
---firstSuccess [Success1 _ e] = e
---firstSuccess [Error e _] = error e
+type Mark = BinOps
+instance PP BinOps where
+  pp Over' = ":"
+convert :: P.Word Mark -> E
+convert = \case
+  P.Atom p 0 l r ->
+    let ts = reverse l <> r
+     in case p of
+          '!' : p' -> Atom (Pattern AtomPos NoVars (TermPred (Pred p') : (map convertTerm ts)))
+          p'       -> Atom (Pattern AtomFree NoVars (TermPred (Pred p') : (map convertTerm ts)))
+  P.Atom {} -> error "incomplete atom"
+  P.BinOp0 x Over' y -> Over (convert x) (convert y)
+  P.Pair l r -> And (convert l) (convert r)
+  P.Nil -> error""
+  P.Var _v -> error""
+  P.Skip -> error""
+  P.Term _t -> error""
 
-splitRules :: [Token] -> [[Token]]
-splitRules = filter (not . null) . splitOn [Token "."]
-
-parseCS :: String -> [E]
-parseCS = map convert . splitRules . tokenize startSpecial
-  where
-    convert = turnConvert . firstSuccess . CS.parse . map (itemize defaultSchema)
+convertTerm :: P.Word Mark -> Term
+convertTerm = \case
+  P.Var v -> TermVar (FreeVar v)
+  P.Term _t -> error"todo"
+  P.Atom p 0 l r -> error""
+  P.Atom {} -> error""
+  P.Nil -> error""
+  P.Skip -> error""
+  P.Pair _ _ -> error""
 
 parseOne :: String -> [Statement]
-parseOne input = map (RuleStatement Nothing) (parseCS input)
-
-oneUt = foldl' UP UNil
-
-fx = newJoin . go . tokenize peel
+parseOne s = result
   where
-    peel (x:r) = if [x] `elem` specialTokens then Just (Token [x], r) else Nothing
-    peel _ = error "unreachable"
-    go  (Token "(" : r) =
-      case span (/= Token ")") r of
-        (xs, Token ")" : r') -> oneUt (go xs) : go r'
-        _ -> error ""
-    go (x : r) = one x : go r
-    go [] = []
-    binaryTokens = ["is", "at", "move", "the"]
-    one (Token ")")                       = error "unmatched ')'"
-    one (Token s@(x : _)) | isUpper x     = UV s
-    one (Token "*")                       = UH
-    one (Token t) | t `elem` binaryTokens = UA t 2 [] []
-    one (Token "&")                       = UA "&" 3 [] []
-    one (Token s@('_' : _))               = UV s
-    one (Token p@(_ : _))                 = UA p (predArity p) [] []
-    one (Token [])                        = error "empty word"
+    result = map (RuleStatement Nothing . convert . P.mergePred "&") x
+    x = tfx s
+
+tfx :: String -> [P.Word BinOps]
+tfx = P.fx specialTokens turnWord
+
+tfx' = map (P.mergePred "&") . P.fx specialTokens turnWord

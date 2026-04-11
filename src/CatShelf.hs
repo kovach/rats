@@ -11,19 +11,9 @@ module CatShelf
   , ParseResult(..)
   , tests
   -- todo remove
-  , itemTy , isClosed, NormalTy(..) , newJoin
+  , itemTy , isClosed, NormalTy(..)
   , exposeL, exposeR
-  , Ut(..)
-  , uvs
-  , tests'
   ) where
-
-import Control.Monad (guard)
-import Basic
-import Data.Function (on)
-import Debug.Trace
-
--- TODO dead code
 
 -- High level idea:
 -- logical form: cat(X)
@@ -38,6 +28,12 @@ import Debug.Trace
 --   cat X, X on Y, Y shelf
 -- standard form:
 --   cat X, on X Y, shelf Y
+
+import Control.Monad (guard)
+import Basic
+import Data.Function (on)
+import Debug.Trace
+import Data.Monoid (All(..))
 
 import Prelude hiding (Word)
 import Control.Monad.State
@@ -496,6 +492,10 @@ runCatShelf base = do
 --efix (Term t) = t
 
 
+printParseResult (Error e _) = putStrLn $ e <> "\n"
+printParseResult (Success0 q) = putStrLn $ unlines (map show q)
+printParseResult (Success1 q t) = putStrLn $ show t <> "\n" <> unlines (map show q)
+
 tests =
   [ "p q"
   , "a a/b b/c c"
@@ -505,96 +505,3 @@ tests =
   , "p (/foo F + /bar b)"
   ]
 
-tests' =
-  [ "a a/b b/c c"
-  , "a (a/b b)"
-  , "cat & black X"
-  , "(cat&black&long) X"
-  , "& a b c"
-  , "a (b & c)"
-  , "a (& b c)"
-  , "a (/b B & c)"
-  , "a (/b B & /c c)"
-  , "a (*/b B & */c c)" -- not needed
-  , "a (/b b & /c c)"
-  , "a (/b B & /c c/d d/e e)"
-  , "q (p p/q)"
-  , "f (A a/sum/b B)"
-  , "the (long & black & cat) is at X"
-  ]
-
-printParseResult (Error e _) = putStrLn $ e <> "\n"
-printParseResult (Success0 q) = putStrLn $ unlines (map show q)
-printParseResult (Success1 q t) = putStrLn $ show t <> "\n" <> unlines (map show q)
-
-cr (h : t) = t <> [h]
-cr [] = []
-data Ut = UA Pred Int [Ut] [Ut] | UV Var | UH | UP Ut Ut | UNil
-  deriving (Eq, Show)
-isLeaf UH = True
-isLeaf UV{} = True
-isLeaf UNil = True
-isLeaf UA{} = False
-isLeaf UP{} = False
-tr f t | isLeaf t = tell $ f t
-tr f (UP l r) = tr f l >> tr f r
-tr f (UA _ _ ls rs) = mapM_ (tr f) (ls <> rs)
-tr _ _ = error "unreachable: check isLeaf"
-uvs :: Ut -> [Var]
-uvs = execWriter . tr f
-  where
-    f (UV v) = [v]
-    f _ = []
-fr t = UV $ fromJust $ find (not . (`elem` (uvs t))) [ "x" <> show i | i <- [0..] ]
-
-insertL UH (UA p n ls rs) = UA p n (UH : ls) rs
-insertL x  (UA p n ls rs) = UA p (n-1) (x : ls) rs
-insertL _ _ = error ""
-insertR UH (UA p n ls rs) = UA p n ls (UH : rs)
-insertR x  (UA p n ls rs) = UA p (n-1) ls (x : rs)
-insertR _ _ = error ""
-
-isTerm UH = True
-isTerm UV{} = True
-isTerm _ = False
-
-join :: Ut -> Ut -> Ut
-
-UNil `join` x = x
-x `join` UNil = x
-u `join` v | isTerm v, Just kr <- stepR u = kr v
-v `join` u | isTerm v, Just kl <- stepL u = kl v
-u `join` v | Just kl <- stepR u, Just kr <- stepL v =
-    let x = fr (UP u v) in UP (kl x) (kr x)
-x `join` y = UP x y
-
-stepR (UP l r) | Just k <- stepR r = Just (UP l . k)
-stepR (UP l r) | Just k <- stepR l = Just (flip UP r . k)
-stepR x@(UA _ i _ _) | i > 0 = Just $ \v -> insertR v x
-stepR _ = Nothing
-
-stepL (UP l r) | Just k <- stepL l = Just (flip UP r . k)
-stepL (UP l r) | Just k <- stepL r = Just (UP l . k)
-stepL x@(UA _ i _ _) | i > 0 = Just $ \v -> insertL v x
-stepL _ = Nothing
-
-simpl (UP l r) = UP (simpl l) (simpl r)
-simpl (UA p i ls rs) = UA p i (fix ls) (fix rs)
-  where
-    fix (UH : vs) = cr $ fix vs
-    fix (v : vs) = v : fix vs
-    fix [] =[]
-simpl x = x
-
-solve (UP l r) = solve l `join` solve r
-solve x = x
-
-newJoin :: [Ut] -> Ut
-newJoin = simpl . solve . foldl' UP UNil
-
-instance PP Ut where
-  pp (UP l r) = pp l <> " " <> pp r
-  pp (UA p i ls rs) = (if i > 0 then "[!"<>show i<>"]" else "") <> pwrap (unwords (p : map pp (reverse ls <> rs)))
-  pp (UV v) = v
-  pp (UH) = "*"
-  pp UNil = "."

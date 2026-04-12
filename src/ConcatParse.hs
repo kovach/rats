@@ -37,6 +37,7 @@ data Word a
 tests' =
   [ "a a:b b:c c"
   , "a (a:b b)"
+  , "p (I & q) r I"
   , "cat & black X"
   , "(cat&black&long) X"
   , "& a b c"
@@ -50,6 +51,8 @@ tests' =
   , "q (p p:q)"
   , "f (A a:sum:b B)"
   , "the (long & black & cat) is at X"
+  , "P p It it:range R"
+  , "Q P p:q"
   ]
 
 isLeaf  = \case
@@ -92,10 +95,16 @@ insertR Skip (Atom p n ls rs) = Atom p n ls (Skip : rs)
 insertR x  (Atom p n ls rs) = Atom p (n-1) ls (x : rs)
 insertR _ _ = error ""
 
-isTerm Skip = True
-isTerm Var{} = True
-isTerm Term{} = True -- TODO
-isTerm _ = False
+data Direction = R | L
+
+isTerm _ v@Skip  = Just (Nil, v)
+isTerm _ v@Var{} = Just (Nil, v)
+isTerm _ Term{} = Nothing
+isTerm R (Pair l r) | Just (r', t) <- isTerm R r = Just (pair l r', t)
+isTerm R (Pair l r) | Just (l', t) <- isTerm R l = Just (pair l' r, t)
+isTerm L (Pair l r) | Just (l', t) <- isTerm L l = Just (pair l' r, t)
+isTerm L (Pair l r) | Just (r', t) <- isTerm L r = Just (pair l r', t)
+isTerm _ _ = Nothing
 
 pattern BinOp2 op = Term op
 pattern BinOp1 x op = Pair x (BinOp2 op)
@@ -114,19 +123,6 @@ fresh = do
   put t
   pure h
 
-join :: Word a -> Word a -> M (Word a)
-Nil `join` x = pure x
-x `join` Nil = pure x
-x `join` BinOp2 op = pure $ BinOp1 x op
-BinOp1 x op `join` y = pure $ BinOp0 x op y
-u `join` v | isTerm v, Just kr <- stepR u = pure $ kr v
-v `join` u | isTerm v, Just kl <- stepL u = pure $ kl v
-u `join` v | Just kl <- stepR u
-           , Just kr <- stepL v = do
-  x <- Var . GenVar <$> fresh
-  pure $ Pair (kl x) (kr x)
-x `join` y = pure $ Pair x y
-
 stepR (Pair l r) | Just k <- stepR r = Just (Pair l . k)
 stepR (Pair l r) | Just k <- stepR l = Just (flip Pair r . k)
 stepR x@(Atom _ i _ _) | i > 0 = Just $ \v -> insertR v x
@@ -136,6 +132,19 @@ stepL (Pair l r) | Just k <- stepL l = Just (flip Pair r . k)
 stepL (Pair l r) | Just k <- stepL r = Just (Pair l . k)
 stepL x@(Atom _ i _ _) | i > 0 = Just $ \v -> insertL v x
 stepL _ = Nothing
+
+join :: Word a -> Word a -> M (Word a)
+Nil `join` x = pure x
+x `join` Nil = pure x
+x `join` BinOp2 op = pure $ BinOp1 x op
+BinOp1 x op `join` y = pure $ BinOp0 x op y
+u `join` v | Just (v', t) <- isTerm L v, Just kr <- stepR u = join (kr t) v'
+v `join` u | Just (v', t) <- isTerm R v, Just kl <- stepL u = join v' (kl t)
+u `join` v | Just kl <- stepR u
+           , Just kr <- stepL v = do
+  x <- Var . GenVar <$> fresh
+  pure $ Pair (kl x) (kr x)
+x `join` y = pure $ Pair x y
 
 simpl (Pair l r) = Pair (simpl l) (simpl r)
 simpl (Atom p i ls rs) = Atom p i (fix ls) (fix rs)

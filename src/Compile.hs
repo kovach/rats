@@ -742,3 +742,4 @@ tfx :: String -> [P.Word BinOps]
 tfx = P.fx specialTokens turnWord
 
 tfx' = map (P.mergePred "&") . P.fx specialTokens turnWord
+

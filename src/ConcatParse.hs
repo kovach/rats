@@ -1,6 +1,6 @@
 module ConcatParse where
 
-import Control.Monad ( guard, when )
+import Control.Monad ( guard, when, zipWithM_ )
 import qualified Data.Map.Strict as Map
 import Basic
 import Data.Function ( on )
@@ -273,3 +273,26 @@ mergePred p w =
            [] -> Map.empty
            _  -> Map.fromList [(r, Var canon) | r <- vs, r /= canon]
     mkSubst _ = Map.empty
+
+-- IVar and GenVar are treated equivalently
+alphaEquiv :: Eq a => Word a -> Word a -> Bool
+alphaEquiv w1 w2 = isJust $ execStateT (go w1 w2) (Map.empty, Map.empty)
+  where
+    go (Var v1) (Var v2) = do
+      (fwd, bwd) <- get
+      case (Map.lookup v1 fwd, Map.lookup v2 bwd) of
+        (Just v2', Just v1') -> guard (v2' == v2 && v1' == v1)
+        (Nothing,  Nothing)  -> put (Map.insert v1 v2 fwd, Map.insert v2 v1 bwd)
+        _                    -> guard False
+    go (Atom p1 n1 ls1 rs1) (Atom p2 n2 ls2 rs2) = do
+      guard (p1 == p2 && n1 == n2 && length ls1 == length ls2 && length rs1 == length rs2)
+      zipWithM_ go ls1 ls2
+      zipWithM_ go rs1 rs2
+    go (Pair l1 r1) (Pair l2 r2) = go l1 l2 >> go r1 r2
+    go Nil         Nil           = pure ()
+    go Skip        Skip          = pure ()
+    go (Term a1)   (Term a2)     = guard (a1 == a2)
+    go _           _             = guard False
+
+
+-- tests

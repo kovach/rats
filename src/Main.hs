@@ -13,6 +13,7 @@ import CatShelf
 import ConcatParse
 import Compile
 import Basic (pp)
+import TestConcatParse
 
 main :: IO ()
 main = do

@@ -73,7 +73,7 @@ executable rats
       , Parser
       , Parser2
       , CatShelf
-      , ConcatParse
+      , ConcatParse, TestConcatParse
       , Process
 
       , Derp.Types, Derp.Core, Derp.Parse

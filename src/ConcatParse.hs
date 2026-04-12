@@ -12,7 +12,7 @@ import Control.Monad ( foldM )
 import Control.Monad.State
 
 import Data.Function ((&))
-import Data.List as List
+import Data.List as List hiding ( insert )
 import Data.Maybe hiding ( mapMaybe )
 import Text.Read ( readMaybe )
 import Data.Char
@@ -87,15 +87,16 @@ completeWord = ConcatParse.all check
     check (Atom _ i _ _) | i > 0 = False
     check _ = True
 
--- Skip is used to shift the arguments to an atom; does not consume arity when bound
-insertL Skip (Atom p n ls rs) = Atom p n (Skip : ls) rs
-insertL x  (Atom p n ls rs) = Atom p (n-1) (x : ls) rs
-insertL _ _ = error ""
-insertR Skip (Atom p n ls rs) = Atom p n ls (Skip : rs)
-insertR x  (Atom p n ls rs) = Atom p (n-1) ls (x : rs)
-insertR _ _ = error ""
-
+-- All the operations are left/right biased depending on whether
+-- they are acting the left or right half of an adjacent pair.
 data Direction = R | L
+
+-- Skip is used to shift the arguments to an atom; does not consume arity when bound
+insert L Skip (Atom p n ls rs) = Atom p n (Skip : ls) rs
+insert L x  (Atom p n ls rs)   = Atom p (n-1) (x : ls) rs
+insert R Skip (Atom p n ls rs) = Atom p n ls (Skip : rs)
+insert R x  (Atom p n ls rs)   = Atom p (n-1) ls (x : rs)
+insert _ _ _ = error ""
 
 isTerm _ v@Skip  = Just (Nil, v)
 isTerm _ v@Var{} = Just (Nil, v)
@@ -110,6 +111,7 @@ pattern BinOp2 op = Term op
 pattern BinOp1 x op = Pair x (BinOp2 op)
 pattern BinOp0 x op y  = Pair (BinOp1 x op) y
 
+-- Monad for accessing a supply of fresh names
 data Stream a = Stream a (Stream a)
 freshVars :: Stream String
 freshVars = go 1
@@ -122,26 +124,26 @@ fresh = do
   Stream h t <- get
   put t
   pure h
+runM s = evalState s freshVars
 
-stepR (Pair l r) | Just k <- stepR r = Just (Pair l . k)
-stepR (Pair l r) | Just k <- stepR l = Just (flip Pair r . k)
-stepR x@(Atom _ i _ _) | i > 0 = Just $ \v -> insertR v x
-stepR _ = Nothing
-
-stepL (Pair l r) | Just k <- stepL l = Just (flip Pair r . k)
-stepL (Pair l r) | Just k <- stepL r = Just (Pair l . k)
-stepL x@(Atom _ i _ _) | i > 0 = Just $ \v -> insertL v x
-stepL _ = Nothing
+slot R (Pair l r) | Just k <- slot R r = Just (Pair l . k)
+slot R (Pair l r) | Just k <- slot R l = Just (flip Pair r . k)
+slot L (Pair l r) | Just k <- slot L l = Just (flip Pair r . k)
+slot L (Pair l r) | Just k <- slot L r = Just (Pair l . k)
+slot d x@(Atom _ i _ _) | i > 0 = Just $ \v -> insert d v x
+slot _ _ = Nothing
 
 join :: Word a -> Word a -> M (Word a)
 Nil `join` x = pure x
 x `join` Nil = pure x
 x `join` BinOp2 op = pure $ BinOp1 x op
 BinOp1 x op `join` y = pure $ BinOp0 x op y
-u `join` v | Just (v', t) <- isTerm L v, Just kr <- stepR u = join (kr t) v'
-v `join` u | Just (v', t) <- isTerm R v, Just kl <- stepL u = join v' (kl t)
-u `join` v | Just kl <- stepR u
-           , Just kr <- stepL v = do
+-- connect a term and a slot
+u `join` v | Just (v', t) <- isTerm L v, Just kr <- slot R u = join (kr t) v'
+v `join` u | Just (v', t) <- isTerm R v, Just kl <- slot L u = join v' (kl t)
+-- generate a fresh var, join two slots
+u `join` v | Just kl <- slot R u
+           , Just kr <- slot L v = do
   x <- Var . GenVar <$> fresh
   pure $ Pair (kl x) (kr x)
 x `join` y = pure $ Pair x y
@@ -157,6 +159,7 @@ simpl (Atom p i ls rs) = Atom p i (fix ls) (fix rs)
 
 simpl x = x
 
+-- probably this control flow can be cleaned up
 solve :: Word a -> M (Word a)
 solve (Pair l r) = do { l' <- solve l; r' <- solve r; join l' r' }
 solve (Atom p i l r) = do
@@ -164,7 +167,7 @@ solve (Atom p i l r) = do
   r' <- mapM solve r
   pure $ Atom p i l' r'
 solve x = pure x
-runSolve x = evalState (solve x) freshVars
+runSolve = runM . solve
 
 pair Nil x = x
 pair x Nil = x

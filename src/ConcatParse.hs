@@ -136,6 +136,7 @@ slot _ _ = Nothing
 join :: Word a -> Word a -> M (Word a)
 Nil `join` x = pure x
 x `join` Nil = pure x
+-- TODO?: force complete term for BinOp0?
 x `join` BinOp2 op = pure $ BinOp1 x op
 BinOp1 x op `join` y = pure $ BinOp0 x op y
 -- connect a term and a slot

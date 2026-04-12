@@ -668,21 +668,22 @@ main3 = do
 -- TODO move this
 specialTokens :: [String]
 specialTokens = [ "." , "," , "/" , "~" , "&" ]
-endpointMarkers :: [(Char, EndpointCmp)]
-endpointMarkers = zip "~=<>" [ECAny, ECEq, ECLt, ECGt]
-isEndpointJoin a b = do
-  av <- lookup a endpointMarkers
-  bv <- lookup b endpointMarkers
-  pure (av, bv)
+--endpointMarkers :: [(Char, EndpointCmp)]
+--endpointMarkers = zip "~=<>" [ECAny, ECEq, ECLt, ECGt]
+--isEndpointJoin a b = do
+--  av <- lookup a endpointMarkers
+--  bv <- lookup b endpointMarkers
+--  pure (av, bv)
 
 predArity :: P.Pred -> Int
 predArity s = (+1) . length . filter (== ':') $ s
 
-data BinOps = Over' deriving (Show, Eq)
+data BinOps = Over' | And' deriving (Show, Eq)
 
 turnWord = \case
     (P.Token "&") -> Just $ P.Atom "&" 3 [] []
     (P.Token "/") -> Just $ P.Term Over'
+    (P.Token ",") -> Just $ P.Term And'
     (P.Token t) | predStart t ->
       let (_, core) = splitPrefix t
        in if core `elem` binaryTokens
@@ -705,6 +706,7 @@ isAssertive = P.any isAssert
 type Mark = BinOps
 instance PP BinOps where
   pp Over' = "/"
+  pp And' = ","
 convert :: P.Word Mark -> E
 convert = \case
   P.Atom p 0 l r ->
@@ -714,6 +716,7 @@ convert = \case
           p'       -> Atom (Pattern AtomFree NoVars (TermPred (Pred p') : (map convertTerm ts)))
   P.Atom {} -> error "incomplete atom"
   P.BinOp0 x Over' y -> Over (convert x) (convert y)
+  P.BinOp0 x And' y -> And (convert x) (convert y)
   P.Pair l r | isAssertive l -> GenAnd ECLt ECAny (convert l) (convert r)
   P.Pair l r -> And (convert l) (convert r)
   P.Nil -> error""
@@ -742,4 +745,3 @@ tfx :: String -> [P.Word BinOps]
 tfx = P.fx specialTokens turnWord
 
 tfx' = map (P.mergePred "&") . P.fx specialTokens turnWord
-

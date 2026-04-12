@@ -1,0 +1,2 @@
+NOTE: the counting algorithm in this sub directory cannot work as currently designed.
+It fails to retract `p` at the second iteration of `!p -> p. p -> p` because of the loop justification.

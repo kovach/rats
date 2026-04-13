@@ -16,6 +16,9 @@ import MMap (MMap)
 class Show a => PP a where
   pp  :: a -> String
 
+instance PP () where
+  pp = show
+
 instance (PP a, PP b) => PP (a, b) where
   pp (a,b) = "(" <> pp a <> ", " <> pp b <> ")"
 

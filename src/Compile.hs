@@ -592,26 +592,6 @@ mkFile path p = do
   prelude <- GD.readPrelude
   writeFile path $ prelude <> p
 
--- demo name rules = do
---     case find (byName) rules of
---       Just (RuleStatement _ r) -> do
---         let f = TRule name r
---         --let f = (name, fromJust $ lookup name rules)
---         pprint $ r
---         putStrLn "~~~~~~~~~"
---         let f' = elab f
---         pprint f'
---         putStrLn "~~~~~~~~~"
---         let Rule body h = generateConstraints' $ trE f' -- todo
---         mapM_ pprint body
---         putStrLn "---------"
---         mapM_ pprint h
---         putStrLn "~~~~~~~~~"
---       _ -> error ""
---   where
---     byName (RuleStatement (Just n) _) | n == name = True
---     byName _ = False
-
 genDerp ttt = do
   let name _ r@(RuleStatement (Just _) _) = r
       name n (RuleStatement Nothing r) = RuleStatement (Just n) r
@@ -682,8 +662,9 @@ data BinOps = Over' | And' deriving (Show, Eq)
 
 turnWord = \case
     (P.Token "&") -> Just $ P.Atom "&" 3 [] []
-    (P.Token "/") -> Just $ P.Term Over'
-    (P.Token ",") -> Just $ P.Term And'
+    (P.Token "/") -> Just $ P.Atom "/" 3 [] []
+    (P.Token ",") -> Just $ P.Atom "," 3 [] []
+    --(P.Token ",") -> Just $ P.Term And'
     (P.Token t) | predStart t ->
       let (_, core) = splitPrefix t
        in if core `elem` binaryTokens
@@ -710,7 +691,7 @@ instance PP BinOps where
 convert :: P.Word Mark -> E
 convert = \case
   P.Atom p 0 l r ->
-    let ts = reverse l <> r
+    let ts = P.ofLR l r
      in case p of
           '!' : p' -> Atom (Pattern AtomPos NoVars (TermPred (Pred p') : (map convertTerm ts)))
           p'       -> Atom (Pattern AtomFree NoVars (TermPred (Pred p') : (map convertTerm ts)))
@@ -742,6 +723,7 @@ parseOne s = result
     x = tfx s
 
 tfx :: String -> [P.Word BinOps]
-tfx = P.fx specialTokens turnWord
+tfx = P.toWords specialTokens turnWord
 
-tfx' = map (P.mergePred "&") . P.fx specialTokens turnWord
+tfx' :: String -> [P.Word ()]
+tfx' = map (P.mergePred "&") . P.toWords specialTokens turnWord

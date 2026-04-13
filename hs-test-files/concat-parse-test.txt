@@ -1,0 +1,18 @@
+a a:b b:c c.
+a (a:b b).
+p (I & q) r I.
+cat & black X.
+(cat&black&long) X.
+& a b c.
+a (b & c).
+a (& b c).
+a (:b B & c).
+a (:b B & :c c).
+a (*:b B & *:c c).
+a (:b b & :c c).
+a (:b B & :c c:d d:e e).
+q (p p:q).
+f (A a:sum:b B).
+the (long & black & cat) is at X.
+P p It it:range R.
+Q P p:q.

@@ -20,7 +20,7 @@ import Data.List.Split
 
 type Pred = String
 data Var = IVar String | GenVar String
-  deriving (Eq, Ord, Show)
+  deriving (Eq, Ord, Show, Read)
 
 varStr :: Var -> String
 varStr (IVar s)    = s
@@ -31,6 +31,8 @@ data Word a
   | Pair (Word a) (Word a) | Nil
   | Var Var | Skip | Term a
   deriving (Eq, Show)
+
+deriving instance Read a => Read (Word a)
 
 -- Examples
 -- require definition in Compile to run
@@ -47,7 +49,7 @@ tests' =
   , "a (:b B & :c c)"
   , "a (*:b B & *:c c)" -- skip optional here
   , "a (:b b & :c c)"
-  , "a (:b B & :c c/d d/e e)"
+  , "a (:b B & :c c:d d:e e)"
   , "q (p p:q)"
   , "f (A a:sum:b B)"
   , "the (long & black & cat) is at X"
@@ -61,24 +63,26 @@ isLeaf  = \case
 
 isVar = \case Var{} -> True; _ -> False
 
-tr f = execWriter . go
+ofLR ls rs = foldl' (flip (:)) rs ls
+
+walk f = execWriter . go
   where
     go w = do
       tell (f w)
       case w of
         Pair l r       -> go l >> go r
-        Atom _ _ ls rs -> mapM_ go (ls <> rs)
+        Atom _ _ ls rs -> mapM_ go (ofLR ls rs)
         _              -> pure ()
 
-all f = getAll . tr (All . f)
-any f = getAny . tr (Any . f)
+all f = getAll . walk (All . f)
+any f = getAny . walk (Any . f)
 
 -- variables in term
 vars :: Word a -> [Var]
-vars = tr $ \case Var v -> [v]; _ -> []
+vars = walk $ \case Var v -> [v]; _ -> []
 
 findAll :: (Word a -> Bool) -> Word a -> [Word a]
-findAll p = tr $ \w -> [w | p w]
+findAll p = walk $ \w -> [w | p w]
 
 -- atoms with >0 arity are incomplete
 completeWord :: Word a -> Bool
@@ -185,7 +189,7 @@ instance PP Var where
   pp (GenVar v) = v
 instance PP a => PP (Word a) where
   pp (Pair l r) = pp l <> " " <> pp r
-  pp (Atom p i ls rs) = (if i > 0 then "[!"<>show i<>"]" else "") <> pwrap (unwords (p : map pp (reverse ls <> rs)))
+  pp (Atom p i ls rs) = (if i > 0 then "[!"<>show i<>"]" else "") <> pwrap (unwords (p : map pp (ofLR ls rs)))
   pp (Var v) = pp v
   pp (Skip) = "*"
   pp (Term a) = pp a
@@ -207,8 +211,8 @@ pickToken sp = pickToken' ""
 tokenize :: (String -> Maybe (Token, String)) -> String -> [Token]
 tokenize sp s = pickToken sp s
 
-fx :: PP a => [String] -> (Token -> Maybe (Word a)) -> String -> [Word a]
-fx specialTokens turnWord =
+toWords :: PP a => [String] -> (Token -> Maybe (Word a)) -> String -> [Word a]
+toWords specialTokens turnWord =
     tokenize peel
     .> splitRules
     .> map (check . newJoin . go)
@@ -295,5 +299,12 @@ alphaEquiv w1 w2 = isJust $ execStateT (go w1 w2) (Map.empty, Map.empty)
     go (Term a1)   (Term a2)     = guard (a1 == a2)
     go _           _             = guard False
 
-
--- tests
+-- For each variable, the first atom (left-to-right) in which it appears.
+-- Variables not inside any atom are omitted.
+varFirstAtom :: Word a -> Map.Map Var (Word a)
+varFirstAtom w = execState (go Nothing w) Map.empty
+  where
+    go (Just atom) (Var v)           = modify $ Map.insertWith (\_ old -> old) v atom
+    go ctx         (Pair l r)        = go ctx l >> go ctx r
+    go _          a@(Atom _ _ ls rs) = mapM_ (go (Just a)) (ofLR ls rs)
+    go _           _                 = pure ()

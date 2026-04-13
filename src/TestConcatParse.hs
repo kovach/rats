@@ -33,15 +33,3 @@ runTest test equiv input expected = do
     appendFile expected $ unlines newLines
 
 newTestConcat = runTest (\x -> case tfx' x of [w] -> w; _ -> Nil) alphaEquiv "hs-test-files/concat-parse-test.txt" "hs-test-files/concat-parse-test.out.txt"
-expected = []
-testConcatParse = do
-    i <- foldM check 0 (zip expected tests')
-    putStrLn $ "passing: " <> show i
-  where
-    check :: Int -> (ConcatParse.Word (), String) -> IO Int
-    check acc (a,b) =
-      if alphaEquiv a (head (tfx' b))
-         then pure $ acc+1
-         else do
-           putStrLn $ "bad parse: " <> b
-           pure acc

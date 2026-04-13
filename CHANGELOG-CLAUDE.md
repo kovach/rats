@@ -1,3 +1,12 @@
+# 26/04/13
+  - TODO: missing many entries prior to this one
+  - 6958d00c98ef25f56f3a7d73a08acd6e7a2065a2
+  - I wrote a short unit test function (load tests from file, expected from file, compare, if more tests than expected, append new results)
+  - asked Claude to explain the function; it referred to it as a "golden
+    ratchet"; asked if missing any parts of that pattern; it suggested 1) don't
+    write goldens if any tests failed (aha!) 2) key them so that tests can be
+    re-ordered 3) print new outputs; it added those features.
+
 # 26/02/21
 ## join re-ordering
 probably should index predicates before this will do much
